@@ -112,13 +112,16 @@ def render(
     else:
         colors_precomp = override_color
 
+    semantic_feature = pc.get_semantic_feature # [ADD Feat]
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
     if mask is not None:
+        raise NotImplementedError("Masking is not implemented yet.")
         rendered_image, radii, depth, opacity = rasterizer(
             means3D=means3D[mask],
             means2D=means2D[mask],
             shs=shs[mask],
             colors_precomp=colors_precomp[mask] if colors_precomp is not None else None,
+            semantic_feature = semantic_feature[mask] if semantic_feature is not None else None, # [ADD Feat]
             opacities=opacity[mask],
             scales=scales[mask],
             rotations=rotations[mask],
@@ -127,11 +130,12 @@ def render(
             rho=viewpoint_camera.cam_trans_delta,
         )
     else:
-        rendered_image, radii, depth, opacity, n_touched = rasterizer(
+        rendered_image, radii, depth, feature_map, opacity, n_touched = rasterizer( # [ADD feature_map]
             means3D=means3D,
             means2D=means2D,
             shs=shs,
             colors_precomp=colors_precomp,
+            semantic_feature = semantic_feature, # [ADD Feat]
             opacities=opacity,
             scales=scales,
             rotations=rotations,
@@ -148,6 +152,7 @@ def render(
         "visibility_filter": radii > 0,
         "radii": radii,
         "depth": depth,
+        'feature_map': feature_map,
         "opacity": opacity,
         "n_touched": n_touched,
     }

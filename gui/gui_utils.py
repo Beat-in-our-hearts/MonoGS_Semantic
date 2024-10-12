@@ -97,6 +97,7 @@ class GaussianPacket:
             self.get_rotation = gaussians.get_rotation.detach().clone()
             self.max_sh_degree = gaussians.max_sh_degree
             self.get_features = gaussians.get_features.detach().clone()
+            self.get_semantic_feature = gaussians.get_semantic_feature.detach().clone()
 
             self._rotation = gaussians._rotation.detach().clone()
             self.rotation_activation = torch.nn.functional.normalize

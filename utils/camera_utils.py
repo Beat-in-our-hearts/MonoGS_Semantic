@@ -21,6 +21,7 @@ class Camera(nn.Module):
         fovy,
         image_height,
         image_width,
+        semantic_feature_dim = 8,
         device="cuda:0",
     ):
         super(Camera, self).__init__()
@@ -45,6 +46,7 @@ class Camera(nn.Module):
         self.FoVy = fovy
         self.image_height = image_height
         self.image_width = image_width
+        self.semantic_feature_dim = semantic_feature_dim
 
         self.cam_rot_delta = nn.Parameter(
             torch.zeros(3, requires_grad=True, device=device)
