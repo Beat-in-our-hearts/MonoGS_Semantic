@@ -14,3 +14,6 @@ datasets
 wandb
 
 result*
+*.ckpt
+*.pth
+*.pt

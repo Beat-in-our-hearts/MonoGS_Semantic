@@ -3,7 +3,7 @@ FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 # ce-certificates 
-RUN apt-get update && apt-get install -y --no-install-recommends curl wget git zip unzip vim build-essential cmake htop tmux g++ \
+RUN apt-get update && apt-get install -y --no-install-recommends curl wget git git-lfs zip unzip vim build-essential cmake htop tmux g++ \
 libjpeg-dev libpng-dev libtiff-dev libavcodec-dev libavformat-dev libswscale-dev libv4l-dev ffmpeg libsm6 libxext6 libgl1
 
 COPY --from=glvnd /usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu

@@ -1,4 +1,4 @@
-name: MonoGS_Semantic
+name: MonoGS_Semantic_Dev
 channels:
   - pytorch
   - nvidia
@@ -9,9 +9,9 @@ dependencies:
   - plyfile=0.8.1
   - python=3.8
   - pip=22.3.1
-  - pytorch=2.4.0
-  - torchvision=0.19.0
-  - torchaudio=2.4.0
+  - pytorch=2.1.2
+  - torchvision=0.16.2
+  - torchaudio=2.1.2
   - pytorch-cuda=11.8
   - tqdm
   - pip:
@@ -31,3 +31,11 @@ dependencies:
     - lpips
     - rich
     - ruff
+    - -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.1/index.html
+    - numpy<2
+    - mmengine==0.10.2
+    - mmcv==2.1.0
+    - mmdet==3.3.0
+    - timm
+    - regex
+    - ftfy

@@ -188,7 +188,10 @@ class GaussianModel:
         
         if cam.semantic_feature_dim is not None:
             self._semantic_feature = torch.zeros(fused_point_cloud.shape[0], cam.semantic_feature_dim, 1).float().cuda() # [ADD Feat]
-            print(time.time())
+            # formatting
+            time_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            number_of_points = self.get_xyz.shape[0]
+            print(f"Info: {time_text} - {number_of_points} points have been added to the model.")
         else:
             self._semantic_feature = torch.empty(0, device="cuda") # [ADD Feat]
         
@@ -342,7 +345,7 @@ class GaussianModel:
             l.append("rot_{}".format(i))
         # Add semantic features [ADD Feat]
         for i in range(self._semantic_feature.shape[1]*self._semantic_feature.shape[2]):
-            l.append("semantic_feature_{}".format(i))
+            l.append("semantic_{}".format(i))
         return l
 
     def save_ply(self, path):
@@ -377,7 +380,7 @@ class GaussianModel:
         ]
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
         attributes = np.concatenate(
-            (xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1
+            (xyz, normals, f_dc, f_rest, opacities, scale, rotation, semantic_feature), axis=1
         )
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, "vertex")

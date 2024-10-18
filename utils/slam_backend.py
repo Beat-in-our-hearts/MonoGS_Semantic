@@ -168,9 +168,7 @@ class BackEnd(mp.Process):
             for cam_idx in range(len(current_window)):
                 viewpoint = viewpoint_stack[cam_idx]
                 keyframes_opt.append(viewpoint)
-                render_pkg = render(
-                    viewpoint, self.gaussians, self.pipeline_params, self.background
-                )
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
                 (
                     image,
                     viewspace_point_tensor,
@@ -179,6 +177,7 @@ class BackEnd(mp.Process):
                     depth,
                     opacity,
                     n_touched,
+                    feature_map,
                 ) = (
                     render_pkg["render"],
                     render_pkg["viewspace_points"],
@@ -187,6 +186,7 @@ class BackEnd(mp.Process):
                     render_pkg["depth"],
                     render_pkg["opacity"],
                     render_pkg["n_touched"],
+                    render_pkg["feature_map"],
                 )
 
                 loss_mapping += get_loss_mapping(
