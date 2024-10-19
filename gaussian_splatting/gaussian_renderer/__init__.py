@@ -29,6 +29,7 @@ def render(
     scaling_modifier=1.0,
     override_color=None,
     mask=None,
+    flag_semantic=False, # [ADD Feat]
 ):
     """
     Render the scene.
@@ -68,6 +69,7 @@ def render(
         sh_degree=pc.active_sh_degree,
         campos=viewpoint_camera.camera_center,
         prefiltered=False,
+        flag_semantic=flag_semantic, # [ADD Feat]
         debug=False,
     )
 
