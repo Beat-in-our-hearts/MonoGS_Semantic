@@ -4,12 +4,15 @@ import torch
 import torch.nn.functional as F
 import encoding.utils as utils
 from encoding.models.sseg import BaseNet
-from modules.lseg_module import LSegModule
+import clip
 from PIL import Image
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-from additional_utils.encoding_models import MultiEvalModule as LSeg_MultiEvalModule
 from collections import namedtuple
+import time
+
+from .modules.lseg_module import LSegModule
+from .additional_utils.encoding_models import MultiEvalModule as LSeg_MultiEvalModule
 
 # LSeg_args = namedtuple('LSeg_args', ['model', 'backbone', 'dataset', 'workers', 'base_size',
 #                                      'crop_size', 'train_split', 'aux', 'se_loss', 'se_weight',
@@ -46,7 +49,9 @@ def get_legend_patch(npimg, new_palette, labels):
 class LSeg_FeatureExtractor(torch.nn.Module):
     def __init__(self, debug=False):
         super(LSeg_FeatureExtractor, self).__init__()
-        args = LSeg_args(weights='demo_e200.ckpt', 
+        self.debug = debug
+        
+        args = LSeg_args(weights='checkpoints/demo_e200.ckpt', 
                         data_path=None, 
                         dataset='ignore', 
                         backbone='clip_vitl16_384',
@@ -93,21 +98,19 @@ class LSeg_FeatureExtractor(torch.nn.Module):
             
         model = model.eval()
         model = model.cpu()
-        print(model)
+        self._log(model)
         
         self.scales = [0.75, 1.0, 1.25, 1.75]
         self.img_size = args.img_size
-        print("scales: ", self.scales)
-        print("img_size: ", self.img_size)
+        self._log(f"scales: {self.scales}")
+        self._log(f"img_size: {self.img_size}")
         
         self.evaluator = LSeg_MultiEvalModule(model, self.num_classes, scales=self.scales, flip=True).cuda()
         self.evaluator.eval()
-        
-        self.debug = debug
     
     def _log(self, text):
         if self.debug:
-            print(text)
+            print(f"[Debug--LSeg_FeatureExtractor]{text}")
     
     @torch.no_grad()
     def preprocess(self, image):
@@ -118,24 +121,67 @@ class LSeg_FeatureExtractor(torch.nn.Module):
             image = Image.fromarray(image)
             image = self.input_transform(image).unsqueeze(0)
         elif isinstance(image, torch.Tensor):
-            pass 
+            if image.dim() == 3:
+                image = image.unsqueeze(0)
+            elif image.dim() == 4:
+                pass
+            else:
+                raise ValueError("Unsupported input shape. Supported shapes: (C, H, W), (1, C, H, W)")
         else:
             raise ValueError("Unsupported input type. Supported types: str (file path), numpy.ndarray, torch.Tensor")
-        self._log(f"input size: {image.shape}\n")
+        self._log(f"input size: {image.shape}")
         image_tensor = F.interpolate(image, size=(self.img_size[1], self.img_size[0]),
                                       mode="bilinear", align_corners=True)
-        self._log(f"resize size: {image_tensor.shape}\n")
+        self._log(f"resize size: {image_tensor.shape}")
         return image_tensor
     
     @torch.no_grad()
-    def forward_feature(self, image: torch.Tensor):
+    def forward_feature(self, image: torch.Tensor) -> np.ndarray:
         output_features = self.evaluator.parallel_forward(image, return_feature=True)
-        return output_features[0].cpu().numpy().astype(np.float16)
+        self._log(f"resize output_features: {output_features[0].shape}")
+        return output_features[0] # .cpu().numpy().astype(np.float16)
     
     @torch.no_grad()
     def forward(self, image):
+        time_start = time.time()
         image_tensor = self.preprocess(image)
-        return self.forward_feature(image_tensor)
+        feature = self.forward_feature(image_tensor)
+        rgb_render, patches = self.features_to_image(feature)
+        self._log(f"forward time: {time.time() - time_start}")
+        return feature.cpu().numpy().astype(np.float16), rgb_render, patches
+    
+    @torch.no_grad()
+    def features_to_image(self, image_features: torch.Tensor, labels_set = None):
+        # time_start = time.time()
+        imshape = image_features.shape
+        feature_dim = imshape[1]
+        image_features = image_features.permute(0,2,3,1).reshape(-1, feature_dim)
+        if labels_set is None or len(labels_set) == 0:
+            text_features = self.evaluator.module.net.clip_pretrained.encode_text(self.evaluator.module.net.text.cuda())
+            labels_set = self.labels
+        else:
+            text = clip.tokenize(labels_set)  
+            text_features = self.evaluator.module.net.clip_pretrained.encode_text(text.cuda())
+        # normalized features
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True) 
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True) 
+        
+        logits_per_image = self.evaluator.module.net.logit_scale * image_features.half() @ text_features.t() 
+        out = logits_per_image.float().view(imshape[0], imshape[2], imshape[3], -1).permute(0,3,1,2) 
+        predicts = torch.max(out, 1)[1].cpu().numpy()
+        rgb_render, patches = get_legend_patch(predicts, adepallete, labels_set)
+        rgb_render = rgb_render.convert("RGBA")
+        # self._log(f"features_to_image time: {time.time() - time_start}")
+        # PIL image to numpy array
+        return np.array(rgb_render), patches
+    
+    def draw_patches(self, patches, save_path):
+        plt.figure()
+        plt.axis('off')
+        plt.legend(handles=patches, prop={'size': 8}, ncol=4)
+        plt.savefig(save_path, format="png", dpi=300, bbox_inches="tight")
+        plt.clf() # Clear the current figure
+        plt.close() # Close the current figure
 
     @torch.no_grad()
     def vis_feature(self, image, outname='test', outdir='vis'):

@@ -77,7 +77,7 @@ class SLAM_GUI:
         threading.Thread(target=self._update_thread).start()
 
     def init_widget(self):
-        self.window_w, self.window_h = 1600, 900
+        self.window_w, self.window_h = 1600, 800
 
         self.window = gui.Application.instance.create_window(
             "MonoGS", self.window_w, self.window_h
@@ -120,13 +120,13 @@ class SLAM_GUI:
 
         self.panel.add_child(gui.Label("Viewpoint Options"))
 
-        viewpoint_tile = gui.Horiz(0.5 * em, gui.Margins(margin))
+        # viewpoint_tile = gui.Horiz(0.5 * em, gui.Margins(margin))
         vp_subtile1 = gui.Vert(0.5 * em, gui.Margins(margin))
         vp_subtile2 = gui.Vert(0.5 * em, gui.Margins(margin))
 
         ##Check boxes
         vp_subtile1.add_child(gui.Label("Camera follow options"))
-        chbox_tile = gui.Horiz(0.5 * em, gui.Margins(margin))
+        chbox_tile = gui.Vert(0.5 * em, gui.Margins(margin))
         self.followcam_chbox = gui.Checkbox("Follow Camera")
         self.followcam_chbox.checked = True
         chbox_tile.add_child(self.followcam_chbox)
@@ -146,12 +146,14 @@ class SLAM_GUI:
         combo_tile.add_child(self.combo_kf)
         vp_subtile2.add_child(combo_tile)
 
-        viewpoint_tile.add_child(vp_subtile1)
-        viewpoint_tile.add_child(vp_subtile2)
-        self.panel.add_child(viewpoint_tile)
+        # viewpoint_tile.add_child(vp_subtile1)
+        # viewpoint_tile.add_child(vp_subtile2)
+        # self.panel.add_child(viewpoint_tile)
+        self.panel.add_child(vp_subtile1)
+        self.panel.add_child(vp_subtile2)
 
         self.panel.add_child(gui.Label("3D Objects"))
-        chbox_tile_3dobj = gui.Horiz(0.5 * em, gui.Margins(margin))
+        chbox_tile_3dobj = gui.Vert(0.5 * em, gui.Margins(margin))
         self.cameras_chbox = gui.Checkbox("Cameras")
         self.cameras_chbox.checked = True
         self.cameras_chbox.set_on_checked(self._on_cameras_chbox)
@@ -168,7 +170,7 @@ class SLAM_GUI:
         chbox_tile_3dobj.add_child(self.axis_chbox)
 
         self.panel.add_child(gui.Label("Rendering options"))
-        chbox_tile_geometry = gui.Horiz(0.5 * em, gui.Margins(margin))
+        chbox_tile_geometry = gui.Vert(0.5 * em, gui.Margins(margin))
 
         self.depth_chbox = gui.Checkbox("Depth")
         self.depth_chbox.checked = False
@@ -185,10 +187,15 @@ class SLAM_GUI:
         self.elipsoid_chbox = gui.Checkbox("Elipsoid Shader")
         self.elipsoid_chbox.checked = False
         chbox_tile_geometry.add_child(self.elipsoid_chbox)
+        
+        # [ADD Feature]
+        self.semantic_chbox = gui.Checkbox("Semantic Map")
+        self.semantic_chbox.checked = False
+        chbox_tile_geometry.add_child(self.semantic_chbox)
 
         self.panel.add_child(chbox_tile_geometry)
 
-        slider_tile = gui.Horiz(0.5 * em, gui.Margins(margin))
+        slider_tile = gui.Vert(0.5 * em, gui.Margins(margin))
         slider_label = gui.Label("Gaussian Scale (0-1)")
         self.scaling_slider = gui.Slider(gui.Slider.DOUBLE)
         self.scaling_slider.set_limits(0.001, 1.0)
@@ -206,7 +213,6 @@ class SLAM_GUI:
 
         ## Rendering Tab
         tab_margins = gui.Margins(0, int(np.round(0.5 * em)), 0, 0)
-        tabs = gui.TabControl()
 
         tab_info = gui.Vert(0, tab_margins)
         self.output_info = gui.Label("Number of Gaussians: ")
@@ -214,13 +220,19 @@ class SLAM_GUI:
 
         self.in_rgb_widget = gui.ImageWidget()
         self.in_depth_widget = gui.ImageWidget()
-        tab_info.add_child(gui.Label("Input Color/Depth"))
+        self.in_semantic_widget = gui.ImageWidget()
+        tab_info.add_child(gui.Label("Input Color/Depth: "))
         tab_info.add_child(self.in_rgb_widget)
         tab_info.add_child(self.in_depth_widget)
-
-        tabs.add_tab("Info", tab_info)
-        self.panel.add_child(tabs)
+        self.semantic_info = gui.Label("Input Semantic(Only keyframe): ")
+        tab_info.add_child(self.semantic_info)
+        tab_info.add_child(self.in_semantic_widget)
+        
+        self.image_panel = gui.Vert(0.5 * em, gui.Margins(margin))
+        self.image_panel.add_child(tab_info)
+        
         self.window.add_child(self.panel)
+        self.window.add_child(self.image_panel)
 
     def init_glfw(self):
         window_name = "headless rendering"
@@ -271,19 +283,31 @@ class SLAM_GUI:
 
     def _on_layout(self, layout_context):
         contentRect = self.window.content_rect
-        self.widget3d_width_ratio = 0.7
-        self.widget3d_width = int(
-            self.window.size.width * self.widget3d_width_ratio
-        )  # 15 ems wide
+        self.widget3d_width_ratio = 0.6
+        self.widget3d_width = int(self.window.size.width * self.widget3d_width_ratio)  # 15 ems wide
         self.widget3d.frame = gui.Rect(
             contentRect.x, contentRect.y, self.widget3d_width, contentRect.height
         )
+        
+        self.all_panel_width = int(self.window.size.width * (1-self.widget3d_width_ratio))
+        self.image_panel_width_ratio = 0.6
+        self.panel_width = int(self.all_panel_width * (1-self.image_panel_width_ratio))
+        self.image_panel_width = int(self.all_panel_width * self.image_panel_width_ratio)
+    
         self.panel.frame = gui.Rect(
             self.widget3d.frame.get_right(),
             contentRect.y,
-            contentRect.width - self.widget3d_width,
-            contentRect.height,
+            self.panel_width,
+            contentRect.height
         )
+        
+        self.image_panel.frame = gui.Rect(
+            self.panel.frame.get_right(),
+            contentRect.y,
+            self.image_panel_width,
+            contentRect.height
+        )
+        
 
     def _on_close(self):
         self.is_done = True
@@ -445,6 +469,11 @@ class SLAM_GUI:
             depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
             rgb = o3d.geometry.Image(depth)
             self.in_depth_widget.update_image(rgb)
+            
+        if gaussian_packet.gtsemantic is not None:
+            semantic = gaussian_packet.gtsemantic
+            rgb_semantic = o3d.geometry.Image(semantic)
+            self.in_semantic_widget.update_image(rgb_semantic)
 
         if gaussian_packet.finish:
             Log("Received terminate signal", tag="GUI")
@@ -582,6 +611,10 @@ class SLAM_GUI:
             depth = torch.permute(depth, (2, 0, 1)).float()
             depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
             render_img = o3d.geometry.Image(depth)
+            
+            self.semantic_info.text = "Input Semantic(Only keyframe): {}".format(
+                results["feature_map"].shape
+            )
 
         elif self.opacity_chbox.checked:
             opacity = results["opacity"]
@@ -594,7 +627,17 @@ class SLAM_GUI:
             opacity = torch.permute(opacity, (2, 0, 1)).float()
             opacity = (opacity).byte().permute(1, 2, 0).contiguous().cpu().numpy()
             render_img = o3d.geometry.Image(opacity)
-
+        
+        # [ADD Feature]
+        elif self.semantic_chbox.checked:
+            feature_map = results["feature_map"]
+            self.semantic_info.text = "Input Semantic(Only keyframe): {}".format(
+                feature_map.shape
+            )
+            
+            # vis_feature = self.feature_extractor.features_to_image(feature_map)
+            # render_img = o3d.geometry.Image(vis_feature)
+ 
         elif self.elipsoid_chbox.checked:
             if self.gaussian_cur is None:
                 return

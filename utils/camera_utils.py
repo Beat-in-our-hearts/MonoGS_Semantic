@@ -4,6 +4,7 @@ from torch import nn
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from utils.slam_utils import image_gradient, image_gradient_mask
 
+SEMANTIC_FEATURES_DIM = 128
 
 class Camera(nn.Module):
     def __init__(
@@ -21,8 +22,10 @@ class Camera(nn.Module):
         fovy,
         image_height,
         image_width,
-        semantic_feature_dim = 8,
         device="cuda:0",
+        semantic_feature = None,
+        semantic_feature_dim = SEMANTIC_FEATURES_DIM,
+        vis_semantic_feature = None,
     ):
         super(Camera, self).__init__()
         self.uid = uid
@@ -46,7 +49,9 @@ class Camera(nn.Module):
         self.FoVy = fovy
         self.image_height = image_height
         self.image_width = image_width
+        self.semantic_feature = semantic_feature
         self.semantic_feature_dim = semantic_feature_dim
+        self.vis_semantic_feature = vis_semantic_feature
 
         self.cam_rot_delta = nn.Parameter(
             torch.zeros(3, requires_grad=True, device=device)

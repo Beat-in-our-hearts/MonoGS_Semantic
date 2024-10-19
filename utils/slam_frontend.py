@@ -14,6 +14,7 @@ from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_tracking, get_median_depth
 
+from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureExtractor
 
 class FrontEnd(mp.Process):
     def __init__(self, config):
@@ -53,12 +54,21 @@ class FrontEnd(mp.Process):
         self.kf_interval = self.config["Training"]["kf_interval"]
         self.window_size = self.config["Training"]["window_size"]
         self.single_thread = self.config["Training"]["single_thread"]
-
+    
+    def set_feature_extractor(self):
+        self.feature_extractor = LSeg_FeatureExtractor(debug=True)
+        
     def add_new_keyframe(self, cur_frame_idx, depth=None, opacity=None, init=False):
         rgb_boundary_threshold = self.config["Training"]["rgb_boundary_threshold"]
         self.kf_indices.append(cur_frame_idx)
         viewpoint = self.cameras[cur_frame_idx]
         gt_img = viewpoint.original_image.cuda()
+        
+        # NOTE: [add feature map to the gaussians]
+        cur_semantic_feature, cur_vis_feature, _ = self.feature_extractor(gt_img)
+        viewpoint.semantic_feature = cur_semantic_feature
+        viewpoint.vis_semantic_feature = cur_vis_feature
+        
         valid_rgb = (gt_img.sum(dim=0) > rgb_boundary_threshold)[None]
         if self.monocular:
             if depth is None:
@@ -113,6 +123,10 @@ class FrontEnd(mp.Process):
         self.iteration_count = 0
         self.occ_aware_visibility = {}
         self.current_window = []
+        
+        # NOTE: init feature extractor
+        self.set_feature_extractor()
+        
         # remove everything from the queues
         while not self.backend_queue.empty():
             self.backend_queue.get()
@@ -124,6 +138,15 @@ class FrontEnd(mp.Process):
         depth_map = self.add_new_keyframe(cur_frame_idx, init=True)
         self.request_init(cur_frame_idx, viewpoint, depth_map)
         self.reset = False
+        self.q_main2vis.put(
+            gui_utils.GaussianPacket(
+                current_frame=viewpoint,
+                gtcolor=viewpoint.original_image,
+                gtdepth=viewpoint.depth
+                if not self.monocular
+                else np.zeros((viewpoint.image_height, viewpoint.image_width)),
+                gtsemantic=viewpoint.vis_semantic_feature,
+            ))
 
     def tracking(self, cur_frame_idx, viewpoint):
         prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
@@ -453,6 +476,17 @@ class FrontEnd(mp.Process):
                     )
                     self.request_keyframe(
                         cur_frame_idx, viewpoint, self.current_window, depth_map
+                    )
+                    img_semantic, _ =self.feature_extractor.features_to_image(torch.tensor(viewpoint.semantic_feature).cuda())
+                    self.q_main2vis.put(
+                        gui_utils.GaussianPacket(
+                            current_frame=viewpoint,
+                            gtcolor=viewpoint.original_image,
+                            gtdepth=viewpoint.depth
+                            if not self.monocular
+                            else np.zeros((viewpoint.image_height, viewpoint.image_width)),
+                            gtsemantic=viewpoint.vis_semantic_feature,
+                        )
                     )
                 else:
                     self.cleanup(cur_frame_idx)

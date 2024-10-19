@@ -83,6 +83,7 @@ class GaussianPacket:
         gtcolor=None,
         gtdepth=None,
         gtnormal=None,
+        gtsemantic=None,
         keyframes=None,
         finish=False,
         kf_window=None,
@@ -109,6 +110,7 @@ class GaussianPacket:
         self.gtcolor = self.resize_img(gtcolor, 320)
         self.gtdepth = self.resize_img(gtdepth, 320)
         self.gtnormal = self.resize_img(gtnormal, 320)
+        self.gtsemantic = self.resize_img(gtsemantic, 320)
         self.keyframes = keyframes
         self.finish = finish
         self.kf_window = kf_window

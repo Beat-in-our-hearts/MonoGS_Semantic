@@ -188,10 +188,6 @@ class GaussianModel:
         
         if cam.semantic_feature_dim is not None:
             self._semantic_feature = torch.zeros(fused_point_cloud.shape[0], cam.semantic_feature_dim, 1).float().cuda() # [ADD Feat]
-            # formatting
-            time_text = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-            number_of_points = self.get_xyz.shape[0]
-            print(f"Info: {time_text} - {number_of_points} points have been added to the model.")
         else:
             self._semantic_feature = torch.empty(0, device="cuda") # [ADD Feat]
         

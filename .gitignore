@@ -17,3 +17,5 @@ result*
 *.ckpt
 *.pth
 *.pt
+
+checkpoints
