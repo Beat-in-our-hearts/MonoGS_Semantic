@@ -127,6 +127,7 @@ def get_loss_mapping_rgbd(config, image, depth, viewpoint, initialization=False)
 
     return alpha * l1_rgb.mean() + (1 - alpha) * l1_depth.mean()
 
+# def get_loss_mapping_feature(config, image, depth, viewpoint, initialization=False):
 
 def get_median_depth(depth, opacity=None, mask=None, return_std=False):
     depth = depth.detach().clone()

@@ -10,6 +10,7 @@
 #
 
 import math
+# import time
 
 import torch
 from diff_gaussian_rasterization import (
@@ -31,6 +32,7 @@ def render(
     mask=None,
     flag_semantic=False, # [ADD Feat]
 ):
+    # start_time = time.time()
     """
     Render the scene.
 
@@ -146,15 +148,29 @@ def render(
             rho=viewpoint_camera.cam_trans_delta,
         )
 
+    # print("rendering time: ", time.time() - start_time)
     # Those Gaussians that were frustum culled or had a radius of 0 were not visible.
     # They will be excluded from value updates used in the splitting criteria.
-    return {
-        "render": rendered_image,
-        "viewspace_points": screenspace_points,
-        "visibility_filter": radii > 0,
-        "radii": radii,
-        "depth": depth,
-        'feature_map': feature_map,
-        "opacity": opacity,
-        "n_touched": n_touched,
-    }
+    if flag_semantic:
+        return {
+            "render": rendered_image,
+            "viewspace_points": screenspace_points,
+            "visibility_filter": radii > 0,
+            "radii": radii,
+            "depth": depth,
+            'feature_map': feature_map,
+            "opacity": opacity,
+            "n_touched": n_touched,
+        }
+    else:
+        del feature_map
+        return {
+            "render": rendered_image,
+            "viewspace_points": screenspace_points,
+            "visibility_filter": radii > 0,
+            "radii": radii,
+            "depth": depth,
+            'feature_map': None,
+            "opacity": opacity,
+            "n_touched": n_touched,
+        }

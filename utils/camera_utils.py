@@ -4,7 +4,7 @@ from torch import nn
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from utils.slam_utils import image_gradient, image_gradient_mask
 
-SEMANTIC_FEATURES_DIM = 128
+from utils.common_var import SEMANTIC_FEATURES_DIM
 
 class Camera(nn.Module):
     def __init__(

@@ -2,7 +2,9 @@ import random
 import time
 
 import torch
+import torch.nn as nn
 import torch.multiprocessing as mp
+import torch.nn.functional as F
 from tqdm import tqdm
 
 from gaussian_splatting.gaussian_renderer import render
@@ -12,6 +14,7 @@ from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_mapping
 
+from utils.common_var import *
 
 class BackEnd(mp.Process):
     def __init__(self, config):
@@ -37,6 +40,10 @@ class BackEnd(mp.Process):
         self.current_window = []
         self.initialized = not self.monocular
         self.keyframe_optimizers = None
+        
+        # CNN Decoder to upsample semantic features
+        self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, LSeg_FEATURES_DIM, kernel_size=1).to(self.device)
+        self.cnn_decoder_optimizer = torch.optim.Adam(self.cnn_decoder.parameters(), lr=0.0001)
 
     def set_hyperparams(self):
         self.save_results = self.config["Results"]["save_results"]
@@ -85,9 +92,10 @@ class BackEnd(mp.Process):
 
     def initialize_map(self, cur_frame_idx, viewpoint):
         for mapping_iteration in range(self.init_itr_num):
+            start_time = time.time()
             self.iteration_count += 1
             render_pkg = render(
-                viewpoint, self.gaussians, self.pipeline_params, self.background
+                viewpoint, self.gaussians, self.pipeline_params, self.background, # flag_semantic=True
             )
             (
                 image,
@@ -97,6 +105,7 @@ class BackEnd(mp.Process):
                 depth,
                 opacity,
                 n_touched,
+                feature_map,
             ) = (
                 render_pkg["render"],
                 render_pkg["viewspace_points"],
@@ -105,12 +114,18 @@ class BackEnd(mp.Process):
                 render_pkg["depth"],
                 render_pkg["opacity"],
                 render_pkg["n_touched"],
+                render_pkg["feature_map"],
             )
             loss_init = get_loss_mapping(
                 self.config, image, depth, viewpoint, opacity, initialization=True
             )
-            loss_init.backward()
 
+            # feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+            #                     mode="bilinear", align_corners=True).squeeze(0))
+            # gt_feature = torch.tensor(viewpoint.semantic_feature).cuda()
+            # l1_feature = l1_loss(feature_map, gt_feature)
+            # loss_init += l1_feature
+            loss_init.backward()
             with torch.no_grad():
                 self.gaussians.max_radii2D[visibility_filter] = torch.max(
                     self.gaussians.max_radii2D[visibility_filter],
@@ -131,12 +146,17 @@ class BackEnd(mp.Process):
                     self.iteration_count == self.opt_params.densify_from_iter
                 ):
                     self.gaussians.reset_opacity()
-
+                self.cnn_decoder_optimizer.step()
+                self.cnn_decoder_optimizer.zero_grad()
                 self.gaussians.optimizer.step()
                 self.gaussians.optimizer.zero_grad(set_to_none=True)
-
+            print("Initialization iteration time: ", time.time() - start_time)
+        
+        # del feature_map, gt_feature
+        # torch.cuda.empty_cache() # free up memory
         self.occ_aware_visibility[cur_frame_idx] = (n_touched > 0).long()
         Log("Initialized map")
+        torch.cuda.empty_cache()
         return render_pkg
 
     def map(self, current_window, prune=False, iters=1):
@@ -313,6 +333,7 @@ class BackEnd(mp.Process):
                     if viewpoint.uid == 0:
                         continue
                     update_pose(viewpoint)
+        torch.cuda.empty_cache()
         return gaussian_split
 
     def color_refinement(self):

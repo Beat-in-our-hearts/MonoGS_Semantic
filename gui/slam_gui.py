@@ -420,6 +420,7 @@ class SLAM_GUI:
             return
 
         if gaussian_packet.has_gaussians:
+            del self.gaussian_cur
             self.gaussian_cur = gaussian_packet
             self.output_info.text = "Number of Gaussians: {}".format(
                 self.gaussian_cur.get_xyz.shape[0]
@@ -715,7 +716,7 @@ class SLAM_GUI:
                 break
 
             def update():
-                if self.step % 3 == 0:
+                if self.step % 10 == 0:
                     self.scene_update()
 
                 if self.step >= 1e9:

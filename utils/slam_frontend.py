@@ -57,6 +57,7 @@ class FrontEnd(mp.Process):
     
     def set_feature_extractor(self):
         self.feature_extractor = LSeg_FeatureExtractor(debug=True)
+        self.feature_extractor.eval()
         
     def add_new_keyframe(self, cur_frame_idx, depth=None, opacity=None, init=False):
         rgb_boundary_threshold = self.config["Training"]["rgb_boundary_threshold"]
@@ -64,9 +65,9 @@ class FrontEnd(mp.Process):
         viewpoint = self.cameras[cur_frame_idx]
         gt_img = viewpoint.original_image.cuda()
         
-        # NOTE: [add feature map to the gaussians]
+        # NOTE: [add feature map to the gaussians] cur_semantic_feature: numpy array of shape (H, W, C)
         cur_semantic_feature, cur_vis_feature, _ = self.feature_extractor(gt_img)
-        viewpoint.semantic_feature = cur_semantic_feature
+        # viewpoint.semantic_feature = cur_semantic_feature
         viewpoint.vis_semantic_feature = cur_vis_feature
         
         valid_rgb = (gt_img.sum(dim=0) > rgb_boundary_threshold)[None]
@@ -412,7 +413,9 @@ class FrontEnd(mp.Process):
                 )
 
                 # Tracking
+                start_time = time.time()
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                print("Tracking time: ", time.time() - start_time)
 
                 current_window_dict = {}
                 current_window_dict[self.current_window[0]] = self.current_window[1:]
@@ -477,7 +480,7 @@ class FrontEnd(mp.Process):
                     self.request_keyframe(
                         cur_frame_idx, viewpoint, self.current_window, depth_map
                     )
-                    img_semantic, _ =self.feature_extractor.features_to_image(torch.tensor(viewpoint.semantic_feature).cuda())
+    
                     self.q_main2vis.put(
                         gui_utils.GaussianPacket(
                             current_frame=viewpoint,
@@ -524,7 +527,11 @@ class FrontEnd(mp.Process):
                 elif data[0] == "init":
                     self.sync_backend(data)
                     self.requested_init = False
-
+                    self.q_main2vis.put(
+                        gui_utils.GaussianPacket(
+                            gaussians=clone_obj(self.gaussians),
+                        )
+                    )
                 elif data[0] == "stop":
                     Log("Frontend Stopped.")
                     break

@@ -60,7 +60,7 @@ class LSeg_FeatureExtractor(torch.nn.Module):
                         scale_inv=False,
                         widehead=True,
                         widehead_hr=False,
-                        img_size=[480, 360])
+                        img_size=[360, 480])
         
         module = LSegModule.load_from_checkpoint(
             checkpoint_path=args.weights,
@@ -130,10 +130,10 @@ class LSeg_FeatureExtractor(torch.nn.Module):
         else:
             raise ValueError("Unsupported input type. Supported types: str (file path), numpy.ndarray, torch.Tensor")
         self._log(f"input size: {image.shape}")
-        image_tensor = F.interpolate(image, size=(self.img_size[1], self.img_size[0]),
+        image = F.interpolate(image, size=(self.img_size[0], self.img_size[1]),
                                       mode="bilinear", align_corners=True)
-        self._log(f"resize size: {image_tensor.shape}")
-        return image_tensor
+        self._log(f"resize size: {image.shape}")
+        return image
     
     @torch.no_grad()
     def forward_feature(self, image: torch.Tensor) -> np.ndarray:
@@ -146,15 +146,17 @@ class LSeg_FeatureExtractor(torch.nn.Module):
         time_start = time.time()
         image_tensor = self.preprocess(image)
         feature = self.forward_feature(image_tensor)
-        rgb_render, patches = self.features_to_image(feature)
+        numpy_feature = feature.cpu().numpy().astype(np.float16)
+        rgb_render, patches = self.features_to_image(feature) # free memory
         self._log(f"forward time: {time.time() - time_start}")
-        return feature.cpu().numpy().astype(np.float16), rgb_render, patches
+        return numpy_feature, rgb_render, patches
     
     @torch.no_grad()
     def features_to_image(self, image_features: torch.Tensor, labels_set = None):
         # time_start = time.time()
         imshape = image_features.shape
         feature_dim = imshape[1]
+        image_features = image_features.half()
         image_features = image_features.permute(0,2,3,1).reshape(-1, feature_dim)
         if labels_set is None or len(labels_set) == 0:
             text_features = self.evaluator.module.net.clip_pretrained.encode_text(self.evaluator.module.net.text.cuda())
@@ -162,17 +164,18 @@ class LSeg_FeatureExtractor(torch.nn.Module):
         else:
             text = clip.tokenize(labels_set)  
             text_features = self.evaluator.module.net.clip_pretrained.encode_text(text.cuda())
+        self._log(f"image_features: {image_features.shape}, text_features: {text_features.shape}")
         # normalized features
         image_features = image_features / image_features.norm(dim=-1, keepdim=True) 
         text_features = text_features / text_features.norm(dim=-1, keepdim=True) 
         
-        logits_per_image = self.evaluator.module.net.logit_scale * image_features.half() @ text_features.t() 
+        logits_per_image = self.evaluator.module.net.logit_scale * image_features @ text_features.t() 
         out = logits_per_image.float().view(imshape[0], imshape[2], imshape[3], -1).permute(0,3,1,2) 
         predicts = torch.max(out, 1)[1].cpu().numpy()
         rgb_render, patches = get_legend_patch(predicts, adepallete, labels_set)
         rgb_render = rgb_render.convert("RGBA")
-        # self._log(f"features_to_image time: {time.time() - time_start}")
-        # PIL image to numpy array
+        del image_features, text_features, logits_per_image, out
+        torch.cuda.empty_cache()
         return np.array(rgb_render), patches
     
     def draw_patches(self, patches, save_path):
