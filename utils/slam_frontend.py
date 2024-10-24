@@ -67,7 +67,7 @@ class FrontEnd(mp.Process):
         
         # NOTE: [add feature map to the gaussians] cur_semantic_feature: numpy array of shape (H, W, C)
         cur_semantic_feature, cur_vis_feature, _ = self.feature_extractor(gt_img)
-        # viewpoint.semantic_feature = cur_semantic_feature
+        viewpoint.semantic_feature = cur_semantic_feature
         viewpoint.vis_semantic_feature = cur_vis_feature
         
         valid_rgb = (gt_img.sum(dim=0) > rgb_boundary_threshold)[None]
@@ -146,7 +146,7 @@ class FrontEnd(mp.Process):
                 gtdepth=viewpoint.depth
                 if not self.monocular
                 else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-                gtsemantic=viewpoint.vis_semantic_feature,
+                # gtsemantic=viewpoint.vis_semantic_feature,
             ))
 
     def tracking(self, cur_frame_idx, viewpoint):
@@ -203,7 +203,7 @@ class FrontEnd(mp.Process):
                 pose_optimizer.step()
                 converged = update_pose(viewpoint)
 
-            if tracking_itr % 10 == 0:
+            if tracking_itr % 30 == 0:
                 self.q_main2vis.put(
                     gui_utils.GaussianPacket(
                         current_frame=viewpoint,
@@ -215,10 +215,16 @@ class FrontEnd(mp.Process):
                 )
             if converged:
                 break
-
+        self.tracking_over_vis(viewpoint)
         self.median_depth = get_median_depth(depth, opacity)
         return render_pkg
 
+    def tracking_over_vis(self, viewpoint):
+        render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
+        feature_map = render_pkg["feature_map"]
+        vis_feature, _ = self.feature_extractor.features_to_image(feature_map)
+        self.q_main2vis.put(gui_utils.GaussianPacket(gtsemantic=vis_feature))
+        
     def is_keyframe(
         self,
         cur_frame_idx,

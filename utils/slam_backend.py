@@ -95,7 +95,7 @@ class BackEnd(mp.Process):
             start_time = time.time()
             self.iteration_count += 1
             render_pkg = render(
-                viewpoint, self.gaussians, self.pipeline_params, self.background, # flag_semantic=True
+                viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True
             )
             (
                 image,
@@ -120,11 +120,12 @@ class BackEnd(mp.Process):
                 self.config, image, depth, viewpoint, opacity, initialization=True
             )
 
-            # feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
-            #                     mode="bilinear", align_corners=True).squeeze(0))
-            # gt_feature = torch.tensor(viewpoint.semantic_feature).cuda()
-            # l1_feature = l1_loss(feature_map, gt_feature)
-            # loss_init += l1_feature
+            feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                mode="bilinear", align_corners=True).squeeze(0))
+            gt_feature = torch.tensor(viewpoint.semantic_feature).cuda()
+            l1_feature = l1_loss(feature_map, gt_feature)
+            print("L1 feature loss: ", l1_feature)
+            loss_init += l1_feature
             loss_init.backward()
             with torch.no_grad():
                 self.gaussians.max_radii2D[visibility_filter] = torch.max(
@@ -150,8 +151,8 @@ class BackEnd(mp.Process):
                 self.cnn_decoder_optimizer.zero_grad()
                 self.gaussians.optimizer.step()
                 self.gaussians.optimizer.zero_grad(set_to_none=True)
-            print("Initialization iteration time: ", time.time() - start_time)
-        
+            # print("Initialization iteration time: ", time.time() - start_time)
+        torch.save(feature_map, "feature_map.pt")
         # del feature_map, gt_feature
         # torch.cuda.empty_cache() # free up memory
         self.occ_aware_visibility[cur_frame_idx] = (n_touched > 0).long()

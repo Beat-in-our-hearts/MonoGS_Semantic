@@ -155,7 +155,13 @@ class LSeg_FeatureExtractor(torch.nn.Module):
     def features_to_image(self, image_features: torch.Tensor, labels_set = None):
         # time_start = time.time()
         imshape = image_features.shape
-        feature_dim = imshape[1]
+        if len(imshape) == 3:
+            image_features = image_features.unsqueeze(0)
+            feature_dim = imshape[0]
+        elif len(imshape) == 4:
+            feature_dim = imshape[1]
+        else:
+            raise ValueError("Unsupported input shape. Supported shapes: (C, H, W), (1, C, H, W)")
         image_features = image_features.half()
         image_features = image_features.permute(0,2,3,1).reshape(-1, feature_dim)
         if labels_set is None or len(labels_set) == 0:
