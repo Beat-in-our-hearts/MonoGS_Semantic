@@ -53,14 +53,14 @@ def depth_reg(depth, gt_image, huber_eps=0.1, mask=None):
     return err
 
 
-def get_loss_tracking(config, image, depth, opacity, viewpoint, initialization=False):
+def get_loss_tracking(config, image, depth, opacity, viewpoint, initialization=False) -> torch.Tensor:
     image_ab = (torch.exp(viewpoint.exposure_a)) * image + viewpoint.exposure_b
     if config["Training"]["monocular"]:
         return get_loss_tracking_rgb(config, image_ab, depth, opacity, viewpoint)
     return get_loss_tracking_rgbd(config, image_ab, depth, opacity, viewpoint)
 
 
-def get_loss_tracking_rgb(config, image, depth, opacity, viewpoint):
+def get_loss_tracking_rgb(config, image, depth, opacity, viewpoint) -> torch.Tensor:
     gt_image = viewpoint.original_image.cuda()
     _, h, w = gt_image.shape
     mask_shape = (1, h, w)
@@ -73,7 +73,7 @@ def get_loss_tracking_rgb(config, image, depth, opacity, viewpoint):
 
 def get_loss_tracking_rgbd(
     config, image, depth, opacity, viewpoint, initialization=False
-):
+) -> torch.Tensor:
     alpha = config["Training"]["alpha"] if "alpha" in config["Training"] else 0.95
 
     gt_depth = torch.from_numpy(viewpoint.depth).to(
