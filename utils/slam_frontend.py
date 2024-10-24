@@ -67,7 +67,7 @@ class FrontEnd(mp.Process):
         
         # NOTE: [add feature map to the gaussians] cur_semantic_feature: numpy array of shape (H, W, C)
         cur_semantic_feature, cur_vis_feature, _ = self.feature_extractor(gt_img)
-        # viewpoint.semantic_feature = cur_semantic_feature
+        viewpoint.semantic_feature = cur_semantic_feature
         viewpoint.vis_semantic_feature = cur_vis_feature
         
         valid_rgb = (gt_img.sum(dim=0) > rgb_boundary_threshold)[None]
@@ -139,15 +139,15 @@ class FrontEnd(mp.Process):
         depth_map = self.add_new_keyframe(cur_frame_idx, init=True)
         self.request_init(cur_frame_idx, viewpoint, depth_map)
         self.reset = False
-        self.q_main2vis.put(
-            gui_utils.GaussianPacket(
-                current_frame=viewpoint,
-                gtcolor=viewpoint.original_image,
-                gtdepth=viewpoint.depth
-                if not self.monocular
-                else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-                gtsemantic=viewpoint.vis_semantic_feature,
-            ))
+        # self.q_main2vis.put(
+        #     gui_utils.GaussianPacket(
+        #         current_frame=viewpoint,
+        #         gtcolor=viewpoint.original_image,
+        #         gtdepth=viewpoint.depth
+        #         if not self.monocular
+        #         else np.zeros((viewpoint.image_height, viewpoint.image_width)),
+        #         gtsemantic=viewpoint.vis_semantic_feature,
+        #     ))
 
     def tracking(self, cur_frame_idx, viewpoint):
         prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
@@ -215,10 +215,16 @@ class FrontEnd(mp.Process):
                 )
             if converged:
                 break
-
+        # self.tracking_over_vis(viewpoint)
         self.median_depth = get_median_depth(depth, opacity)
         return render_pkg
-
+    
+    # def tracking_over_vis(self, viewpoint):
+    #     render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
+    #     feature_map = render_pkg["feature_map"]
+    #     vis_feature, _ = self.feature_extractor.features_to_image(feature_map)
+    #     self.q_main2vis.put(gui_utils.GaussianPacket(gtsemantic=vis_feature))
+        
     def is_keyframe(
         self,
         cur_frame_idx,
