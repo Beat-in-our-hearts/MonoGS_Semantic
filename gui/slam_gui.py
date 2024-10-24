@@ -224,7 +224,7 @@ class SLAM_GUI:
         tab_info.add_child(gui.Label("Input Color/Depth: "))
         tab_info.add_child(self.in_rgb_widget)
         tab_info.add_child(self.in_depth_widget)
-        self.semantic_info = gui.Label("Input Semantic(Only keyframe): ")
+        self.semantic_info = gui.Label("Output Semantic: ")
         tab_info.add_child(self.semantic_info)
         tab_info.add_child(self.in_semantic_widget)
         
@@ -716,7 +716,7 @@ class SLAM_GUI:
                 break
 
             def update():
-                if self.step % 10 == 0:
+                if self.step % 2 == 0:
                     self.scene_update()
 
                 if self.step >= 1e9:

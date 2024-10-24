@@ -155,6 +155,14 @@ class LSeg_FeatureExtractor(torch.nn.Module):
     def features_to_image(self, image_features: torch.Tensor, labels_set = None):
         # time_start = time.time()
         imshape = image_features.shape
+        if len(imshape) == 3:
+            image_features = image_features.unsqueeze(0)
+            feature_dim = imshape[0]
+        elif len(imshape) == 4:
+            feature_dim = imshape[1]
+        else:
+            raise ValueError("Unsupported input shape. Supported shapes: (C, H, W), (1, C, H, W)")
+        imshape = image_features.shape
         feature_dim = imshape[1]
         image_features = image_features.half()
         image_features = image_features.permute(0,2,3,1).reshape(-1, feature_dim)
@@ -164,7 +172,7 @@ class LSeg_FeatureExtractor(torch.nn.Module):
         else:
             text = clip.tokenize(labels_set)  
             text_features = self.evaluator.module.net.clip_pretrained.encode_text(text.cuda())
-        self._log(f"image_features: {image_features.shape}, text_features: {text_features.shape}")
+        # self._log(f"image_features: {image_features.shape}, text_features: {text_features.shape}")
         # normalized features
         image_features = image_features / image_features.norm(dim=-1, keepdim=True) 
         text_features = text_features / text_features.norm(dim=-1, keepdim=True) 

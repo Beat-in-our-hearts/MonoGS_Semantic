@@ -2,7 +2,11 @@ import time
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.multiprocessing as mp
+import torch.nn.functional as F
+
+from PIL import Image
 
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
@@ -14,6 +18,7 @@ from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_tracking, get_median_depth
 
+from utils.common_var import *
 from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureExtractor
 
 class FrontEnd(mp.Process):
@@ -43,6 +48,10 @@ class FrontEnd(mp.Process):
         self.cameras = dict()
         self.device = "cuda:0"
         self.pause = False
+        
+        # CNN Decoder to upsample semantic features
+        self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, LSeg_FEATURES_DIM, kernel_size=1).to(self.device)
+        self.cnn_decoder.eval() # no gradient
 
     def set_hyperparams(self):
         self.save_dir = self.config["Results"]["save_dir"]
@@ -139,15 +148,15 @@ class FrontEnd(mp.Process):
         depth_map = self.add_new_keyframe(cur_frame_idx, init=True)
         self.request_init(cur_frame_idx, viewpoint, depth_map)
         self.reset = False
-        # self.q_main2vis.put(
-        #     gui_utils.GaussianPacket(
-        #         current_frame=viewpoint,
-        #         gtcolor=viewpoint.original_image,
-        #         gtdepth=viewpoint.depth
-        #         if not self.monocular
-        #         else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-        #         gtsemantic=viewpoint.vis_semantic_feature,
-        #     ))
+        self.q_main2vis.put(
+            gui_utils.GaussianPacket(
+                current_frame=viewpoint,
+                gtcolor=viewpoint.original_image,
+                gtdepth=viewpoint.depth
+                if not self.monocular
+                else np.zeros((viewpoint.image_height, viewpoint.image_width)),
+                # gtsemantic=viewpoint.vis_semantic_feature,
+            ))
 
     def tracking(self, cur_frame_idx, viewpoint):
         prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
@@ -184,6 +193,7 @@ class FrontEnd(mp.Process):
         )
 
         pose_optimizer = torch.optim.Adam(opt_params)
+        vis_feature = self.vis_current_frame(viewpoint, cur_frame_idx)
         for tracking_itr in range(self.tracking_itr_num):
             render_pkg = render(
                 viewpoint, self.gaussians, self.pipeline_params, self.background
@@ -211,19 +221,24 @@ class FrontEnd(mp.Process):
                         gtdepth=viewpoint.depth
                         if not self.monocular
                         else np.zeros((viewpoint.image_height, viewpoint.image_width)),
+                        gtsemantic=vis_feature
                     )
                 )
             if converged:
                 break
-        # self.tracking_over_vis(viewpoint)
         self.median_depth = get_median_depth(depth, opacity)
         return render_pkg
     
-    # def tracking_over_vis(self, viewpoint):
-    #     render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
-    #     feature_map = render_pkg["feature_map"]
-    #     vis_feature, _ = self.feature_extractor.features_to_image(feature_map)
-    #     self.q_main2vis.put(gui_utils.GaussianPacket(gtsemantic=vis_feature))
+    def vis_current_frame(self, viewpoint, cur_frame_idx):
+        render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
+        feature_map = render_pkg["feature_map"]
+        feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                    mode="bilinear", align_corners=True).squeeze(0))
+        vis_feature, _ = self.feature_extractor.features_to_image(feature_map)
+        image = Image.fromarray(vis_feature)
+        image.save(f"vis/vis_feature_{cur_frame_idx}.png")
+        return vis_feature
+        # self.q_main2vis.put(gui_utils.GaussianPacket(current_frame=viewpoint, gtsemantic=vis_feature))
         
     def is_keyframe(
         self,
@@ -333,6 +348,8 @@ class FrontEnd(mp.Process):
         self.gaussians = data[1]
         occ_aware_visibility = data[2]
         keyframes = data[3]
+        received_state_dict = data[4]
+        self.cnn_decoder.load_state_dict({key: value.cuda() for key, value in received_state_dict.items()})
         self.occ_aware_visibility = occ_aware_visibility
 
         for kf_id, kf_R, kf_T in keyframes:
@@ -426,7 +443,6 @@ class FrontEnd(mp.Process):
                 current_window_dict = {}
                 current_window_dict[self.current_window[0]] = self.current_window[1:]
                 keyframes = [self.cameras[kf_idx] for kf_idx in self.current_window]
-
                 self.q_main2vis.put(
                     gui_utils.GaussianPacket(
                         gaussians=clone_obj(self.gaussians),
@@ -494,7 +510,7 @@ class FrontEnd(mp.Process):
                             gtdepth=viewpoint.depth
                             if not self.monocular
                             else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-                            gtsemantic=viewpoint.vis_semantic_feature,
+                            # gtsemantic=viewpoint.vis_semantic_feature,
                         )
                     )
                 else:
