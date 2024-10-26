@@ -31,7 +31,7 @@ from utils.logging_utils import Log
 import clip
 
 from utils.common_var import *
-from feature_encoder.lseg_encoder.feature_extractor import get_legend_patch, adepallete, get_labels
+from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureDecoder
 
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
@@ -79,45 +79,15 @@ class SLAM_GUI:
         self.save_path = pathlib.Path(self.save_path)
         self.save_path.mkdir(parents=True, exist_ok=True)
 
-        # # [ADD Feature]
-        # clip_model, _ = clip.load("ViT-B/32", device='cuda', jit=False)
-        # self.text_encoder = clip_model.encode_text
-        # self.lseg_labels_set = get_labels(dataset='ade20k', root_path='feature_encoder/lseg_encoder')
-
+        self.init_feature_decoder()
         threading.Thread(target=self._update_thread).start()
+        
 
-    # def visualize_semantic_lseg(self, image_features:torch.Tensor, labels_set=None):
-    #     if len(image_features.shape) == 3:
-    #         image_features = image_features.unsqueeze(0)
-    #     elif len(image_features.shape) == 4:
-    #         pass 
-    #     else:
-    #         raise ValueError("Unsupported input shape. Supported shapes: (C, H, W), (1, C, H, W)")
-    #     imshape = image_features.shape
-    #     feature_dim = imshape[1]
-    #     image_features = image_features.half()
-    #     image_features = image_features.permute(0,2,3,1).reshape(-1, feature_dim)
-    #     if labels_set is None or len(labels_set) == 0:
-    #         labels_set = self.lseg_labels_set
-    #     text = clip.tokenize(labels_set)  
-    #     text_features = self.text_encoder(text.cuda())
-        
-    #     # normalized features
-    #     image_features = image_features / image_features.norm(dim=-1, keepdim=True) 
-    #     text_features = text_features / text_features.norm(dim=-1, keepdim=True)   
-    #     logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07)).exp()
-        
-    #     logits_per_image = logit_scale * image_features @ text_features.t()
-    #     out = logits_per_image.float().view(imshape[0], imshape[2], imshape[3], -1).permute(0,3,1,2) 
-    #     predicts = torch.max(out, 1)[1].cpu().numpy()
-    #     rgb_render, patches = get_legend_patch(predicts, adepallete, labels_set)
-    #     rgb_render = rgb_render.convert("RGBA")
-    #     del image_features, text_features, logits_per_image, out
-    #     torch.cuda.empty_cache()
-    #     return np.array(rgb_render)
     def init_feature_decoder(self):
         self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, LSeg_FEATURES_DIM, kernel_size=1).to(self.device)
         self.cnn_decoder.eval() # no gradient
+        self.feature_decoder = LSeg_FeatureDecoder(debug=False)
+        self.cnn_decoder_init = False
 
     def init_widget(self):
         self.window_w, self.window_h = 1600, 800
@@ -465,6 +435,10 @@ class SLAM_GUI:
         if gaussian_packet.has_gaussians:
             del self.gaussian_cur
             self.gaussian_cur = gaussian_packet
+            if self.gaussian_cur.semantic_decoder is not None:
+                state_dict_cpu = self.gaussian_cur.semantic_decoder
+                self.cnn_decoder.load_state_dict({key: value.cuda() for key, value in state_dict_cpu.items()})
+                self.cnn_decoder_init = True
             self.output_info.text = "Number of Gaussians: {}".format(
                 self.gaussian_cur.get_xyz.shape[0]
             )
@@ -638,15 +612,15 @@ class SLAM_GUI:
                 self.scaling_slider.double_value,
             )
             self.gaussian_cur.get_features = features
-        # elif self.semantic_chbox.checked and self.gaussian_cur is not None and type(self.gaussian_cur) == GaussianPacket:
-        #     rendering_data = render(
-        #         current_cam,
-        #         self.gaussian_cur,
-        #         self.pipe,
-        #         self.background,
-        #         self.scaling_slider.double_value,
-        #         flag_semantic=True,
-        #     )
+        elif self.semantic_chbox.checked and self.gaussian_cur is not None and type(self.gaussian_cur) == GaussianPacket:
+            rendering_data = render(
+                current_cam,
+                self.gaussian_cur,
+                self.pipe,
+                self.background,
+                self.scaling_slider.double_value,
+                flag_semantic=True,
+            )
         else:
             rendering_data = render(
                 current_cam,
@@ -670,10 +644,6 @@ class SLAM_GUI:
             depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
             render_img = o3d.geometry.Image(depth)
             
-            self.semantic_info.text = "Input Semantic(Only keyframe): {}".format(
-                results["feature_map"].shape
-            )
-
         elif self.opacity_chbox.checked:
             opacity = results["opacity"]
             opacity = opacity[0, :, :].detach().cpu().numpy()
@@ -686,11 +656,17 @@ class SLAM_GUI:
             opacity = (opacity).byte().permute(1, 2, 0).contiguous().cpu().numpy()
             render_img = o3d.geometry.Image(opacity)
         
-        # # [ADD Feature]
-        # elif self.semantic_chbox.checked and results["feature_map"] is not None:
-        #     feature_map = results["feature_map"]
-        #     rgb_semantic_numpy = self.visualize_semantic_lseg(feature_map)
-        #     render_img = o3d.geometry.Image(rgb_semantic_numpy)
+        # [ADD Feature]
+        elif self.semantic_chbox.checked and results["feature_map"] is not None and self.cnn_decoder_init:
+            feature_map = results["feature_map"]
+            render_shape = feature_map.shape # C H W
+            resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                                mode="bilinear", align_corners=True).squeeze(0))
+            vis_feature, _ = self.feature_decoder.features_to_image(resize_feature_map)
+            vis_feature.resize([render_shape[1], render_shape[2]])
+            vis_feature_numpy = np.array(vis_feature)
+            render_img = o3d.geometry.Image(vis_feature_numpy)
             
             # vis_feature = self.feature_extractor.features_to_image(feature_map)
             # render_img = o3d.geometry.Image(vis_feature)

@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import encoding.utils as utils
 from encoding.models.sseg import BaseNet
@@ -14,6 +15,7 @@ from torch.amp import autocast
 
 from .modules.lseg_module import LSegModule
 from .additional_utils.encoding_models import MultiEvalModule as LSeg_MultiEvalModule
+
 
 # LSeg_args = namedtuple('LSeg_args', ['model', 'backbone', 'dataset', 'workers', 'base_size',
 #                                      'crop_size', 'train_split', 'aux', 'se_loss', 'se_weight',
@@ -245,3 +247,44 @@ class LSeg_FeatureExtractor(torch.nn.Module):
         plt.savefig(os.path.join(outdir, outname+"_legend.png"), format="png", dpi=300, bbox_inches="tight")
         plt.clf()
         plt.close()
+        
+class LSeg_FeatureDecoder():
+    def __init__(self, debug=False):
+        self.debug = debug
+        args_labels_path = 'feature_encoder/lseg_encoder'
+        self.clip_pretrained, _ = clip.load("ViT-B/32", device='cuda', jit=False, download_root="/tmp/")
+        self.clip_pretrained.eval()
+        self.labels = get_labels('ade20k', root_path=args_labels_path)
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07)).exp()
+        self.logit_scale.to('cuda')
+    
+    @torch.no_grad()
+    def features_to_image(self, image_features: torch.Tensor, labels_set = None):
+        with autocast("cuda"):
+            if len(image_features.shape) == 3:
+                image_features = image_features.unsqueeze(0)
+            elif len(image_features.shape) == 4:
+                pass 
+            else:
+                raise ValueError("Unsupported input shape. Supported shapes: (C, H, W), (1, C, H, W)")
+            
+            imshape = image_features.shape
+            feature_dim = imshape[1]
+            image_features = image_features.half()
+            image_features = image_features.permute(0,2,3,1).reshape(-1, feature_dim)
+            if labels_set is None or len(labels_set) == 0:
+                labels_set = self.labels
+            text = clip.tokenize(labels_set)  
+            text_features = self.clip_pretrained.encode_text(text.cuda())
+            # normalized features
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True) 
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True) 
+            
+            logits_per_image = self.logit_scale * image_features @ text_features.t() 
+            out = logits_per_image.float().view(imshape[0], imshape[2], imshape[3], -1).permute(0,3,1,2) 
+            predicts = torch.max(out, 1)[1].cpu().numpy()
+            rgb_render, patches = get_legend_patch(predicts, adepallete, labels_set)
+            rgb_render = rgb_render.convert("RGBA")
+            del image_features, text_features, logits_per_image, out
+            torch.cuda.empty_cache()
+        return rgb_render, patches
