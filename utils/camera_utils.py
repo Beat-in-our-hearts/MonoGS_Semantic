@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-
+import numpy as np
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from utils.slam_utils import image_gradient, image_gradient_mask
 
@@ -10,8 +10,8 @@ class Camera(nn.Module):
     def __init__(
         self,
         uid,
-        color,
-        depth,
+        color:torch.Tensor,
+        depth:np.ndarray,
         gt_T,
         projection_matrix,
         fx,
@@ -97,6 +97,30 @@ class Camera(nn.Module):
         return Camera(
             uid, None, None, T, projection_matrix, fx, fy, cx, cy, FoVx, FoVy, H, W
         )
+        
+    @staticmethod
+    def copy_camera(camera):
+        gt_T = torch.eye(4, device=camera.device)
+        gt_T[:3, :3] = camera.R_gt
+        gt_T[:3, 3] = camera.T_gt
+        new_camera =  Camera(
+            camera.uid,
+            None,
+            None,
+            gt_T,
+            camera.projection_matrix,
+            camera.fx,
+            camera.fy,
+            camera.cx,
+            camera.cy,
+            camera.FoVx,
+            camera.FoVy,
+            camera.image_height,
+            camera.image_width,
+            camera.device,
+        )
+        new_camera.update_RT(camera.R_gt, camera.T_gt)
+        return new_camera
 
     @property
     def world_view_transform(self):

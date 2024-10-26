@@ -66,6 +66,8 @@ class GaussianModel:
         self.ply_input = None
 
         self.isotropic = False
+        
+        self.semantic_decoder = None # store the parameters of the semantic decoder [ADD Feat]
 
     def build_covariance_from_scaling_rotation(
         self, scaling, scaling_modifier, rotation

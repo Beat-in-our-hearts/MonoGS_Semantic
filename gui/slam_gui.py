@@ -12,6 +12,7 @@ import open3d.visualization.gui as gui
 import open3d.visualization.rendering as rendering
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
 from OpenGL import GL as gl
 
 from gaussian_splatting.gaussian_renderer import render
@@ -27,6 +28,10 @@ from gui.gui_utils import (
 )
 from utils.camera_utils import Camera
 from utils.logging_utils import Log
+import clip
+
+from utils.common_var import *
+from feature_encoder.lseg_encoder.feature_extractor import get_legend_patch, adepallete, get_labels
 
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
@@ -74,7 +79,45 @@ class SLAM_GUI:
         self.save_path = pathlib.Path(self.save_path)
         self.save_path.mkdir(parents=True, exist_ok=True)
 
+        # # [ADD Feature]
+        # clip_model, _ = clip.load("ViT-B/32", device='cuda', jit=False)
+        # self.text_encoder = clip_model.encode_text
+        # self.lseg_labels_set = get_labels(dataset='ade20k', root_path='feature_encoder/lseg_encoder')
+
         threading.Thread(target=self._update_thread).start()
+
+    # def visualize_semantic_lseg(self, image_features:torch.Tensor, labels_set=None):
+    #     if len(image_features.shape) == 3:
+    #         image_features = image_features.unsqueeze(0)
+    #     elif len(image_features.shape) == 4:
+    #         pass 
+    #     else:
+    #         raise ValueError("Unsupported input shape. Supported shapes: (C, H, W), (1, C, H, W)")
+    #     imshape = image_features.shape
+    #     feature_dim = imshape[1]
+    #     image_features = image_features.half()
+    #     image_features = image_features.permute(0,2,3,1).reshape(-1, feature_dim)
+    #     if labels_set is None or len(labels_set) == 0:
+    #         labels_set = self.lseg_labels_set
+    #     text = clip.tokenize(labels_set)  
+    #     text_features = self.text_encoder(text.cuda())
+        
+    #     # normalized features
+    #     image_features = image_features / image_features.norm(dim=-1, keepdim=True) 
+    #     text_features = text_features / text_features.norm(dim=-1, keepdim=True)   
+    #     logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07)).exp()
+        
+    #     logits_per_image = logit_scale * image_features @ text_features.t()
+    #     out = logits_per_image.float().view(imshape[0], imshape[2], imshape[3], -1).permute(0,3,1,2) 
+    #     predicts = torch.max(out, 1)[1].cpu().numpy()
+    #     rgb_render, patches = get_legend_patch(predicts, adepallete, labels_set)
+    #     rgb_render = rgb_render.convert("RGBA")
+    #     del image_features, text_features, logits_per_image, out
+    #     torch.cuda.empty_cache()
+    #     return np.array(rgb_render)
+    def init_feature_decoder(self):
+        self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, LSeg_FEATURES_DIM, kernel_size=1).to(self.device)
+        self.cnn_decoder.eval() # no gradient
 
     def init_widget(self):
         self.window_w, self.window_h = 1600, 800
@@ -455,10 +498,15 @@ class SLAM_GUI:
             self._on_kf_window_chbox(is_checked=self.kf_window_chbox.checked)
 
         if gaussian_packet.gtcolor is not None:
-            rgb = torch.clamp(gaussian_packet.gtcolor, min=0, max=1.0) * 255
-            rgb = rgb.byte().permute(1, 2, 0).contiguous().cpu().numpy()
+            if isinstance(gaussian_packet.gtcolor, torch.Tensor):
+                rgb = torch.clamp(gaussian_packet.gtcolor, min=0, max=1.0) * 255
+                rgb = rgb.byte().permute(1, 2, 0).contiguous().cpu().numpy()
+            elif isinstance(gaussian_packet.gtcolor, np.ndarray):
+                rgb = np.clip(gaussian_packet.gtcolor, 0, 1.0) * 255
+                rgb = rgb.astype(np.uint8)
             rgb = o3d.geometry.Image(rgb)
             self.in_rgb_widget.update_image(rgb)
+            
 
         if gaussian_packet.gtdepth is not None:
             depth = gaussian_packet.gtdepth
@@ -471,8 +519,8 @@ class SLAM_GUI:
             rgb = o3d.geometry.Image(depth)
             self.in_depth_widget.update_image(rgb)
             
-        if gaussian_packet.gtsemantic is not None:
-            semantic = gaussian_packet.gtsemantic
+        if gaussian_packet.vis_semantic is not None:
+            semantic = gaussian_packet.vis_semantic
             rgb_semantic = o3d.geometry.Image(semantic)
             self.in_semantic_widget.update_image(rgb_semantic)
 
@@ -590,6 +638,15 @@ class SLAM_GUI:
                 self.scaling_slider.double_value,
             )
             self.gaussian_cur.get_features = features
+        # elif self.semantic_chbox.checked and self.gaussian_cur is not None and type(self.gaussian_cur) == GaussianPacket:
+        #     rendering_data = render(
+        #         current_cam,
+        #         self.gaussian_cur,
+        #         self.pipe,
+        #         self.background,
+        #         self.scaling_slider.double_value,
+        #         flag_semantic=True,
+        #     )
         else:
             rendering_data = render(
                 current_cam,
@@ -629,12 +686,11 @@ class SLAM_GUI:
             opacity = (opacity).byte().permute(1, 2, 0).contiguous().cpu().numpy()
             render_img = o3d.geometry.Image(opacity)
         
-        # [ADD Feature]
-        elif self.semantic_chbox.checked:
-            feature_map = results["feature_map"]
-            self.semantic_info.text = "Input Semantic(Only keyframe): {}".format(
-                feature_map.shape
-            )
+        # # [ADD Feature]
+        # elif self.semantic_chbox.checked and results["feature_map"] is not None:
+        #     feature_map = results["feature_map"]
+        #     rgb_semantic_numpy = self.visualize_semantic_lseg(feature_map)
+        #     render_img = o3d.geometry.Image(rgb_semantic_numpy)
             
             # vis_feature = self.feature_extractor.features_to_image(feature_map)
             # render_img = o3d.geometry.Image(vis_feature)
@@ -716,7 +772,7 @@ class SLAM_GUI:
                 break
 
             def update():
-                if self.step % 2 == 0:
+                if self.step % 50 == 0:
                     self.scene_update()
 
                 if self.step >= 1e9:

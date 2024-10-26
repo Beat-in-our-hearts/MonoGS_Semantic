@@ -76,8 +76,10 @@ class LSegModule(LSegmentationModule):
         )
         # print(kwargs)
 
-        labels = self.get_labels('ade20k')
-
+        if 'labels_path' in kwargs:
+            labels = self.get_labels('ade20k', root_path=kwargs['labels_path'])
+        else:
+            labels = self.get_labels('ade20k')
         self.net = LSegNet(
             labels=labels,
             backbone=kwargs["backbone"],
@@ -97,10 +99,13 @@ class LSegModule(LSegmentationModule):
         self.mean = norm_mean
         self.std = norm_std
 
-    def get_labels(self, dataset):
+    def get_labels(self, dataset, root_path=None):
         labels = []
         # NOTE：
-        path = './feature_encoder/lseg_encoder/label_files/{}_objectInfo150.txt'.format(dataset)
+        if root_path is None:
+            path = 'label_files/{}_objectInfo150.txt'.format(dataset)
+        else:
+            path = root_path + '/label_files/{}_objectInfo150.txt'.format(dataset)
         assert os.path.exists(path), '*** Error : {} not exist !!!'.format(path)
         f = open(path, 'r') 
         lines = f.readlines()      

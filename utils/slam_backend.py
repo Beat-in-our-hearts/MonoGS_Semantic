@@ -92,42 +92,60 @@ class BackEnd(mp.Process):
 
     def initialize_map(self, cur_frame_idx, viewpoint):
         for mapping_iteration in range(self.init_itr_num):
-            start_time = time.time()
             self.iteration_count += 1
-            render_pkg = render(
-                viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True
-            )
-            (
-                image,
-                viewspace_point_tensor,
-                visibility_filter,
-                radii,
-                depth,
-                opacity,
-                n_touched,
-                feature_map,
-            ) = (
-                render_pkg["render"],
-                render_pkg["viewspace_points"],
-                render_pkg["visibility_filter"],
-                render_pkg["radii"],
-                render_pkg["depth"],
-                render_pkg["opacity"],
-                render_pkg["n_touched"],
-                render_pkg["feature_map"],
-            )
-            loss_init = get_loss_mapping(
-                self.config, image, depth, viewpoint, opacity, initialization=True
-            )
+            if mapping_iteration > MAPPING_START_ITR:
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
+                (
+                    image,
+                    viewspace_point_tensor,
+                    visibility_filter,
+                    radii,
+                    depth,
+                    opacity,
+                    n_touched,
+                    feature_map,
+                ) = (
+                    render_pkg["render"],
+                    render_pkg["viewspace_points"],
+                    render_pkg["visibility_filter"],
+                    render_pkg["radii"],
+                    render_pkg["depth"],
+                    render_pkg["opacity"],
+                    render_pkg["n_touched"],
+                    render_pkg["feature_map"],
+                )
+                loss_init = get_loss_mapping(self.config, image, depth, viewpoint, opacity, initialization=True)
 
-            feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
-                                mode="bilinear", align_corners=True).squeeze(0))
-            gt_feature = torch.tensor(viewpoint.semantic_feature).cuda()
-            l1_feature = l1_loss(feature_map, gt_feature)
-            if mapping_iteration % 50 == 0:
-                print("L1 feature loss: ", l1_feature)
-            loss_init += l1_feature
-            loss_init.backward()
+                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                    mode="bilinear", align_corners=True).squeeze(0))
+                gt_feature = torch.tensor(viewpoint.semantic_feature).cuda()
+                l1_feature = l1_loss(feature_map, gt_feature)
+                if mapping_iteration % 50 == 0:
+                    print("L1 feature loss: ", l1_feature)
+                loss_init += l1_feature
+                loss_init.backward()
+            else:
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
+                (
+                    image,
+                    viewspace_point_tensor,
+                    visibility_filter,
+                    radii,
+                    depth,
+                    opacity,
+                    n_touched,
+                ) = (
+                    render_pkg["render"],
+                    render_pkg["viewspace_points"],
+                    render_pkg["visibility_filter"],
+                    render_pkg["radii"],
+                    render_pkg["depth"],
+                    render_pkg["opacity"],
+                    render_pkg["n_touched"],
+                )
+                loss_init = get_loss_mapping(self.config, image, depth, viewpoint, opacity, initialization=True)
+                loss_init.backward()
+            
             with torch.no_grad():
                 self.gaussians.max_radii2D[visibility_filter] = torch.max(
                     self.gaussians.max_radii2D[visibility_filter],
@@ -153,7 +171,7 @@ class BackEnd(mp.Process):
                 self.gaussians.optimizer.step()
                 self.gaussians.optimizer.zero_grad(set_to_none=True)
             # print("Initialization iteration time: ", time.time() - start_time)
-        torch.save(feature_map, "feature_map.pt")
+        # torch.save(feature_map, "feature_map.pt")
         # del feature_map, gt_feature
         # torch.cuda.empty_cache() # free up memory
         self.occ_aware_visibility[cur_frame_idx] = (n_touched > 0).long()
@@ -366,7 +384,7 @@ class BackEnd(mp.Process):
                     if viewpoint.uid == 0:
                         continue
                     update_pose(viewpoint)
-        torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
         return gaussian_split
 
     def color_refinement(self):
@@ -426,7 +444,6 @@ class BackEnd(mp.Process):
                 if len(self.current_window) == 0:
                     time.sleep(0.01)
                     continue
-
                 if self.single_thread:
                     time.sleep(0.01)
                     continue
@@ -434,6 +451,7 @@ class BackEnd(mp.Process):
                 if self.last_sent >= 10:
                     self.map(self.current_window, prune=True, iters=10)
                     self.push_to_frontend()
+                    print("empty map update")
             else:
                 data = self.backend_queue.get()
                 if data[0] == "stop":
@@ -451,11 +469,8 @@ class BackEnd(mp.Process):
                     depth_map = data[3]
                     Log("Resetting the system")
                     self.reset()
-
                     self.viewpoints[cur_frame_idx] = viewpoint
-                    self.add_next_kf(
-                        cur_frame_idx, viewpoint, depth_map=depth_map, init=True
-                    )
+                    self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map, init=True)
                     self.initialize_map(cur_frame_idx, viewpoint)
                     self.push_to_frontend("init")
 
@@ -526,6 +541,7 @@ class BackEnd(mp.Process):
                     self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)
                     self.push_to_frontend("keyframe")
+                    print("keyframe update")
                 else:
                     raise Exception("Unprocessed data", data)
         while not self.backend_queue.empty():

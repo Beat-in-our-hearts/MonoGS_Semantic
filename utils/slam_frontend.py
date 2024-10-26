@@ -155,7 +155,6 @@ class FrontEnd(mp.Process):
                 gtdepth=viewpoint.depth
                 if not self.monocular
                 else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-                # gtsemantic=viewpoint.vis_semantic_feature,
             ))
 
     def tracking(self, cur_frame_idx, viewpoint):
@@ -221,7 +220,7 @@ class FrontEnd(mp.Process):
                         gtdepth=viewpoint.depth
                         if not self.monocular
                         else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-                        gtsemantic=vis_feature
+                        vis_semantic=vis_feature
                     )
                 )
             if converged:
@@ -238,7 +237,6 @@ class FrontEnd(mp.Process):
         image = Image.fromarray(vis_feature)
         image.save(f"vis/vis_feature_{cur_frame_idx}.png")
         return vis_feature
-        # self.q_main2vis.put(gui_utils.GaussianPacket(current_frame=viewpoint, gtsemantic=vis_feature))
         
     def is_keyframe(
         self,
@@ -280,6 +278,7 @@ class FrontEnd(mp.Process):
         removed_frame = None
         for i in range(N_dont_touch, len(window)):
             kf_idx = window[i]
+
             # szymkiewicz–simpson coefficient
             intersection = torch.logical_and(
                 cur_frame_visibility_filter, occ_aware_visibility[kf_idx]
@@ -442,7 +441,7 @@ class FrontEnd(mp.Process):
 
                 current_window_dict = {}
                 current_window_dict[self.current_window[0]] = self.current_window[1:]
-                keyframes = [self.cameras[kf_idx] for kf_idx in self.current_window]
+                keyframes = [Camera.copy_camera(self.cameras[kf_idx]) for kf_idx in self.current_window]
                 self.q_main2vis.put(
                     gui_utils.GaussianPacket(
                         gaussians=clone_obj(self.gaussians),
@@ -510,7 +509,6 @@ class FrontEnd(mp.Process):
                             gtdepth=viewpoint.depth
                             if not self.monocular
                             else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-                            # gtsemantic=viewpoint.vis_semantic_feature,
                         )
                     )
                 else:

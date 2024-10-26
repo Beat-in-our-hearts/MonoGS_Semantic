@@ -46,6 +46,9 @@ class Frustum:
         self.center = center
         self.eye = eye
         self.up = up
+        
+
+Rgb2Numpy = lambda tensor: tensor.detach().cpu().permute(1, 2, 0).numpy()
 
 
 def create_frustum(pose, frusutum_color=[0, 1, 0], size=0.02):
@@ -83,7 +86,7 @@ class GaussianPacket:
         gtcolor=None,
         gtdepth=None,
         gtnormal=None,
-        gtsemantic=None,
+        vis_semantic=None,
         keyframes=None,
         finish=False,
         kf_window=None,
@@ -110,7 +113,7 @@ class GaussianPacket:
         self.gtcolor = self.resize_img(gtcolor, 320)
         self.gtdepth = self.resize_img(gtdepth, 320)
         self.gtnormal = self.resize_img(gtnormal, 320)
-        self.gtsemantic = self.resize_img(gtsemantic, 320)
+        self.vis_semantic = self.resize_img(vis_semantic, 320)
         self.keyframes = keyframes
         self.finish = finish
         self.kf_window = kf_window
