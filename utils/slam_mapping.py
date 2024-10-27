@@ -313,7 +313,7 @@ class BackEnd_Map(mp.Process):
                     
             for cam_idx in torch.randperm(len(random_viewpoint_stack))[:random_update_num]:
                 viewpoint = random_viewpoint_stack[cam_idx]
-                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=self.semantic_flag)
                 (
                     image,
                     viewspace_point_tensor,
@@ -322,6 +322,7 @@ class BackEnd_Map(mp.Process):
                     depth,
                     opacity,
                     n_touched,
+                    feature_map,
                 ) = (
                     render_pkg["render"],
                     render_pkg["viewspace_points"],
@@ -330,8 +331,23 @@ class BackEnd_Map(mp.Process):
                     render_pkg["depth"],
                     render_pkg["opacity"],
                     render_pkg["n_touched"],
+                    render_pkg["feature_map"],
                 )
                 loss_mapping += get_loss_mapping(self.config, image, depth, viewpoint, opacity)
+                if render_semantic_flag:
+                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                                size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                                                mode="bilinear", align_corners=True).squeeze(0))
+                    if isinstance(viewpoint.semantic_feature, np.ndarray):
+                        gt_feature = torch.tensor(viewpoint.semantic_feature).cuda()
+                    elif isinstance(viewpoint.semantic_feature, str):
+                        gt_feature = torch.tensor(np.load(viewpoint.semantic_feature)).cuda()
+                    elif isinstance(viewpoint.semantic_feature, torch.Tensor):
+                        raise Exception("Do not put torch.Tensor in Camera.semantic_feature")
+                    else:
+                        raise Exception("Unknown semantic feature type")
+                    l1_feature = l1_loss(feature_map, gt_feature)
+                    loss_mapping += l1_feature
                 viewspace_point_tensor_acm.append(viewspace_point_tensor)
                 visibility_filter_acm.append(visibility_filter)
                 radii_acm.append(radii)
@@ -420,76 +436,6 @@ class BackEnd_Map(mp.Process):
         
             torch.cuda.empty_cache()
         return gaussian_split
-    
-    
-    
-    def map_idle(self, current_window, iters=1):
-        self.idle_update +=1
-        # random viewpoints not in the window
-        random_viewpoint_stack = [viewpoint for cam_idx, viewpoint in self.cameras.items() if cam_idx not in current_window]
-        random_update_num = 2
-        
-        for _ in range(iters):
-            self.iteration_count += 1
-            
-            loss_mapping = 0
-            viewspace_point_tensor_acm = []
-            visibility_filter_acm = []
-            radii_acm = []
-  
-            for cam_idx in torch.randperm(len(random_viewpoint_stack))[:random_update_num]:
-                viewpoint = random_viewpoint_stack[cam_idx]
-                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=self.semantic_flag)
-                (
-                    image,
-                    viewspace_point_tensor,
-                    visibility_filter,
-                    radii,
-                    depth,
-                    opacity,
-                    n_touched,
-                    feature_map,
-                ) = (
-                    render_pkg["render"],
-                    render_pkg["viewspace_points"],
-                    render_pkg["visibility_filter"],
-                    render_pkg["radii"],
-                    render_pkg["depth"],
-                    render_pkg["opacity"],
-                    render_pkg["n_touched"],
-                    render_pkg["feature_map"],
-                )
-                loss_mapping += get_loss_mapping(self.config, image, depth, viewpoint, opacity)
-                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
-                                                            size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
-                                                            mode="bilinear", align_corners=True).squeeze(0))
-                if isinstance(viewpoint.semantic_feature, np.ndarray):
-                    gt_feature = torch.tensor(viewpoint.semantic_feature).cuda()
-                elif isinstance(viewpoint.semantic_feature, str):
-                    gt_feature = torch.tensor(np.load(viewpoint.semantic_feature)).cuda()
-                elif isinstance(viewpoint.semantic_feature, torch.Tensor):
-                    raise Exception("Do not put torch.Tensor in Camera.semantic_feature")
-                else:
-                    raise Exception("Unknown semantic feature type")
-                l1_feature = l1_loss(feature_map, gt_feature)
-                loss_mapping += l1_feature
-                viewspace_point_tensor_acm.append(viewspace_point_tensor)
-                visibility_filter_acm.append(visibility_filter)
-                radii_acm.append(radii)
-
-            scaling = self.gaussians.get_scaling
-            isotropic_loss = torch.abs(scaling - scaling.mean(dim=1).view(-1, 1))
-            loss_mapping += 10 * isotropic_loss.mean()
-            loss_mapping.backward()
-            # Deinsifying / Pruning Gaussians
-            with torch.no_grad():
-                self.gaussians.optimizer.step()
-                self.gaussians.optimizer.zero_grad(set_to_none=True)
-                self.gaussians.update_learning_rate(self.iteration_count)
-                self.cnn_decoder_optimizer.step()
-                self.cnn_decoder_optimizer.zero_grad()
-        
-            torch.cuda.empty_cache()
 
     def idle_map(self, current_window, prune=False, iters=1):
         self.idle_update +=1
@@ -507,7 +453,7 @@ class BackEnd_Map(mp.Process):
                     time.sleep(0.01)
                     continue
                 # TODO: when idle, map for few iterations
-                self.idle_map(self.current_window)
+                self.idle_map(self.current_window, iters=5)
                 if self.idle_update % 10 == 0:
                     start_time = time.time() 
                     self.idle_map(self.current_window, prune=True, iters=10)
@@ -546,7 +492,7 @@ class BackEnd_Map(mp.Process):
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
                     
                     frames_to_optimize = self.window_size
-                    iter_per_kf = self.mapping_itr_num if self.single_thread else 10
+                    iter_per_kf = self.mapping_itr_num if self.single_thread else 20
                     if not self.initialized:
                         if len(self.current_window) == self.window_size: 
                             iter_per_kf = 50 if self.live_mode else 300
