@@ -240,8 +240,7 @@ class FrontEnd_Track(mp.Process):
                 image = Image.fromarray(vis_feature)
                 image.save(image_save_path)
         # update gt and render semantic in gui
-        self.update_gui(viewpoint, update_gaussians=True, update_keyframes=True,
-                        vis_semantic=vis_feature if visualize_check else None)
+        self.update_gui(viewpoint, update_gaussians=True, update_keyframes=True)
                 
     
     def is_keyframe(self, cur_frame_idx, last_keyframe_idx, cur_frame_visibility_filter, occ_aware_visibility):
@@ -482,6 +481,7 @@ class FrontEnd_Track(mp.Process):
             else:
                 viewpoint.semantic_feature = cur_semantic_feature
             viewpoint.vis_semantic_feature = cur_vis_feature
+        self.update_gui(viewpoint, vis_semantic=viewpoint.vis_semantic_feature)
         msg = [tag, cur_frame_idx, viewpoint, current_window, depth_map]
         self.backend_queue.put(msg)
         if tag == "keyframe":

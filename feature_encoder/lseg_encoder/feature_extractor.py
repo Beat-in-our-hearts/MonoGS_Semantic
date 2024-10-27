@@ -204,7 +204,7 @@ class LSeg_FeatureExtractor(torch.nn.Module):
             out = logits_per_image.float().view(imshape[0], imshape[2], imshape[3], -1).permute(0,3,1,2) 
             predicts = torch.max(out, 1)[1].cpu().numpy()
             rgb_render, patches = get_legend_patch(predicts, adepallete, labels_set)
-            rgb_render = rgb_render.convert("RGBA")
+            rgb_render = rgb_render.convert("RGB")
             del image_features, text_features, logits_per_image, out
             torch.cuda.empty_cache()
         return np.array(rgb_render), patches

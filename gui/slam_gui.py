@@ -237,7 +237,7 @@ class SLAM_GUI:
         tab_info.add_child(gui.Label("Input Color/Depth: "))
         tab_info.add_child(self.in_rgb_widget)
         tab_info.add_child(self.in_depth_widget)
-        self.semantic_info = gui.Label("Output Semantic: ")
+        self.semantic_info = gui.Label("Input Semantic (keyframe): ")
         tab_info.add_child(self.semantic_info)
         tab_info.add_child(self.in_semantic_widget)
         
