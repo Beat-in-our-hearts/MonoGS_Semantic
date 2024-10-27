@@ -99,11 +99,13 @@ class FrontEnd_Track(mp.Process):
         if self.semantic_flag:
             if self.save_semantic:
                 self.save_semantic_dir = "results/temp"
-                shutil.rmtree(self.save_semantic_dir)
+                if os.path.exists(self.save_semantic_dir):
+                    shutil.rmtree(self.save_semantic_dir)
                 os.makedirs(self.save_semantic_dir)
             if self.save_frame_visualize:
                 self.save_vis_semantic_dir = "results/vis"
-                shutil.rmtree(self.save_vis_semantic_dir)
+                if os.path.exists(self.save_vis_semantic_dir):
+                    shutil.rmtree(self.save_vis_semantic_dir)
                 os.makedirs(self.save_vis_semantic_dir)
             # Feature Extractor
             self.feature_extractor = LSeg_FeatureExtractor(debug=True)
@@ -161,9 +163,7 @@ class FrontEnd_Track(mp.Process):
         depth_map = self.get_keyframe_depth(cur_frame_idx)
         self.request_backend("init", cur_frame_idx, viewpoint, self.current_window, depth_map)
         self.reset = False 
-        
-        # update gt in gui
-        self.update_gui(viewpoint)
+
         
     def update_track_optimizer(self, viewpoint:Camera) -> Optimizer:
         """
@@ -481,7 +481,7 @@ class FrontEnd_Track(mp.Process):
             else:
                 viewpoint.semantic_feature = cur_semantic_feature
             viewpoint.vis_semantic_feature = cur_vis_feature
-        self.update_gui(viewpoint, vis_semantic=viewpoint.vis_semantic_feature)
+            self.update_gui(viewpoint, vis_semantic=viewpoint.vis_semantic_feature)
         msg = [tag, cur_frame_idx, viewpoint, current_window, depth_map]
         self.backend_queue.put(msg)
         if tag == "keyframe":

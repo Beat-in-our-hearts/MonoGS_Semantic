@@ -2,7 +2,7 @@ import pathlib
 import threading
 import time
 from datetime import datetime
-
+from PIL import Image
 import cv2
 import glfw
 import imgviz
@@ -193,9 +193,7 @@ class SLAM_GUI:
         self.opacity_chbox.checked = False
         chbox_tile_geometry.add_child(self.opacity_chbox)
 
-        self.time_shader_chbox = gui.Checkbox("Time Shader")
-        self.time_shader_chbox.checked = False
-        chbox_tile_geometry.add_child(self.time_shader_chbox)
+
 
         self.elipsoid_chbox = gui.Checkbox("Elipsoid Shader")
         self.elipsoid_chbox.checked = False
@@ -205,8 +203,28 @@ class SLAM_GUI:
         self.semantic_chbox = gui.Checkbox("Semantic Map")
         self.semantic_chbox.checked = False
         chbox_tile_geometry.add_child(self.semantic_chbox)
+        
+        # [ADD Feature]
+        self.semantic_scaling_slider = gui.Slider(gui.Slider.DOUBLE)
+        self.semantic_scaling_slider.set_limits(0.1, 1.0)
+        self.semantic_scaling_slider.double_value = 0.5
+        chbox_tile_geometry.add_child(self.semantic_scaling_slider)
+        
+        self.time_shader_chbox = gui.Checkbox("Time Shader")
+        self.time_shader_chbox.checked = False
+        chbox_tile_geometry.add_child(self.time_shader_chbox)
+        
+        # [ADD Feature]
+        self.default_lables_chbox = gui.Checkbox("Default Labels")
+        self.default_lables_chbox.checked = False
+        chbox_tile_geometry.add_child(self.default_lables_chbox)
+        
+        self.default_lables = ["book", "table", "chair"]
+        self.semantic_labels = gui.Label(str(self.default_lables))
+        chbox_tile_geometry.add_child(self.semantic_labels)
 
         self.panel.add_child(chbox_tile_geometry)
+        
 
         slider_tile = gui.Vert(0.5 * em, gui.Margins(margin))
         slider_label = gui.Label("Gaussian Scale (0-1)")
@@ -648,12 +666,14 @@ class SLAM_GUI:
             opacity = results["opacity"]
             opacity = opacity[0, :, :].detach().cpu().numpy()
             max_opacity = np.max(opacity)
+            np.save("results/opacity.npy", opacity)
             opacity = imgviz.depth2rgb(
                 opacity, min_value=0.0, max_value=max_opacity, colormap="jet"
             )
             opacity = torch.from_numpy(opacity)
             opacity = torch.permute(opacity, (2, 0, 1)).float()
             opacity = (opacity).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+            Image.fromarray(opacity).save("results/opacity.png")
             render_img = o3d.geometry.Image(opacity)
         
         # [ADD Feature]
@@ -663,13 +683,26 @@ class SLAM_GUI:
             resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
                                                 size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
                                                 mode="bilinear", align_corners=True).squeeze(0))
-            vis_feature, _ = self.feature_decoder.features_to_image(resize_feature_map)
-            vis_feature.resize([render_shape[1], render_shape[2]])
+            labels_set = self.default_lables if self.default_lables_chbox.checked else None
+            vis_feature, _ = self.feature_decoder.features_to_image(resize_feature_map, labels_set)
+            vis_feature = vis_feature.resize([render_shape[2], render_shape[1]])
             vis_feature_numpy = np.array(vis_feature)
-            render_img = o3d.geometry.Image(vis_feature_numpy)
-            
-            # vis_feature = self.feature_extractor.features_to_image(feature_map)
-            # render_img = o3d.geometry.Image(vis_feature)
+            opacity = results["opacity"]
+            opacity = opacity[0, :, :].detach().cpu().numpy()
+            mask = np.where(opacity >= 0.8, 1, 0).astype(np.uint8)
+            vis_feature_numpy = vis_feature_numpy * mask[..., np.newaxis]
+            rgb = (
+                (torch.clamp(results["render"], min=0, max=1.0) * 255)
+                .byte()
+                .permute(1, 2, 0)
+                .contiguous()
+                .cpu()
+                .numpy()
+            )
+            mix_alpha = self.semantic_scaling_slider.double_value
+            mix_beta = 1 - mix_alpha
+            mix_img = (mix_alpha * vis_feature_numpy + mix_beta * rgb).astype(np.uint8)
+            render_img = o3d.geometry.Image(mix_img)
  
         elif self.elipsoid_chbox.checked:
             if self.gaussian_cur is None:
