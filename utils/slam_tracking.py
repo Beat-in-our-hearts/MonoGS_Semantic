@@ -228,17 +228,17 @@ class FrontEnd_Track(mp.Process):
     
     def update_gui_visualize(self, cur_frame_idx, viewpoint:Camera):
         visualize_check = self.decoder_init and self.semantic_flag
-        if visualize_check:
+        if visualize_check and self.save_frame_visualize:
             render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
             feature_map = render_pkg["feature_map"]
             feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
                                                          size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
                                                          mode="bilinear", align_corners=True).squeeze(0))
-            vis_feature, _ = self.feature_extractor.features_to_image(feature_map)
-            if self.save_frame_visualize:
-                image_save_path = os.path.join(self.save_vis_semantic_dir, f"vis_feature_{cur_frame_idx}.png")
-                image = Image.fromarray(vis_feature)
-                image.save(image_save_path)
+            vis_out = self.feature_extractor.features_to_image(feature_map)
+            vis_feature = vis_out["rgb_render"]
+            image_save_path = os.path.join(self.save_vis_semantic_dir, f"vis_feature_{cur_frame_idx}.png")
+            image = Image.fromarray(vis_feature)
+            image.save(image_save_path)
         # update gt and render semantic in gui
         self.update_gui(viewpoint, update_gaussians=True, update_keyframes=True)
                 
@@ -473,7 +473,7 @@ class FrontEnd_Track(mp.Process):
         if self.semantic_flag:
             # NOTE: [add feature map to the gaussians] cur_semantic_feature: numpy array of shape (H, W, C)
             gt_img = viewpoint.original_image.cuda()
-            cur_semantic_feature, cur_vis_feature, _ = self.feature_extractor(gt_img)
+            cur_semantic_feature, cur_vis_feature, _ = self.feature_extractor.extract_feature(gt_img)
             if self.save_semantic: # NOTE： save semantic feature
                 semantic_path = os.path.join(self.save_semantic_dir, f"semantic_feature_{cur_frame_idx}.npy")
                 np.save(semantic_path, cur_semantic_feature)

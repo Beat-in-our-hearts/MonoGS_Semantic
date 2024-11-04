@@ -684,7 +684,8 @@ class SLAM_GUI:
                                                 size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
                                                 mode="bilinear", align_corners=True).squeeze(0))
             labels_set = self.default_lables if self.default_lables_chbox.checked else None
-            vis_feature, _ = self.feature_decoder.features_to_image(resize_feature_map, labels_set)
+            vis_out = self.feature_decoder.features_to_image(resize_feature_map, labels_set)
+            vis_feature = vis_out["rgb_render"] 
             vis_feature = vis_feature.resize([render_shape[2], render_shape[1]])
             vis_feature_numpy = np.array(vis_feature)
             opacity = results["opacity"]

@@ -65,9 +65,8 @@ def get_legend_patch(npimg, new_palette, labels):
         patches.append(red_patch)
     return out_img, patches
 
-class LSeg_FeatureExtractor(torch.nn.Module):
+class LSeg_FeatureExtractor:
     def __init__(self, debug=False):
-        super(LSeg_FeatureExtractor, self).__init__()
         self.debug = debug
         
         args = LSeg_args(weights='checkpoints/demo_e200.ckpt', 
@@ -165,15 +164,17 @@ class LSeg_FeatureExtractor(torch.nn.Module):
         return output_features[0] # .cpu().numpy().astype(np.float16)
     
     @torch.no_grad()
-    def forward(self, image):
+    def extract_feature(self, image):
         with autocast("cuda"):
             time_start = time.time()
             image_tensor = self.preprocess(image)
             feature = self.forward_feature(image_tensor)
             numpy_feature = feature.cpu().numpy().astype(np.float16)
-            rgb_render, patches = self.features_to_image(feature) # free memory
+            vis_out = self.features_to_image(feature) # free memory
             self._log(f"output_features: {numpy_feature.shape} forward time: {time.time() - time_start}")
-            return numpy_feature, rgb_render, patches
+            output = {"numpy_feature": numpy_feature, "feat_type": "lseg",
+                      "rgb_render": vis_out["rgb_render"], "patches": vis_out["patches"]}
+            return output
     
     @torch.no_grad()
     def features_to_image(self, image_features: torch.Tensor, labels_set = None):
@@ -207,7 +208,8 @@ class LSeg_FeatureExtractor(torch.nn.Module):
             rgb_render = rgb_render.convert("RGB")
             del image_features, text_features, logits_per_image, out
             torch.cuda.empty_cache()
-        return np.array(rgb_render), patches
+            output = {"rgb_render": rgb_render, "patches": patches}
+        return output
     
     def draw_patches(self, patches, save_path):
         plt.figure()
@@ -287,4 +289,5 @@ class LSeg_FeatureDecoder():
             rgb_render = rgb_render.convert("RGB")
             del image_features, text_features, logits_per_image, out
             torch.cuda.empty_cache()
-        return rgb_render, patches
+            output = {"rgb_render": rgb_render, "patches": patches}
+        return output
