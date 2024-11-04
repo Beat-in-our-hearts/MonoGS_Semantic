@@ -20,13 +20,13 @@ cp -r Replica_empty/ /path/to/dataset/replica
 ### 3.Rendering 2D Images
 
 ####  Install Habitat-Sim 0.2.1
-We recommend to use conda to install habitat-sim 0.2.1.
+We recommend to use conda to install habitat-sim 0.2.1. Please build new environment.
 ```angular2html
-conda create -n habitat python=3.8.12 cmake=3.14.0
-conda activate habitat
+conda create -n habitat_data_generation python=3.8.12 cmake=3.14.0 
+conda activate habitat_data_generation
 conda install habitat-sim=0.2.1 withbullet -c conda-forge -c aihabitat 
 conda install numba=0.54.1
-pip install pyyaml imgviz opencv-python
+pip install pyyaml imgviz opencv-python plyfile trimesh==3.10.7
 ```
 
 #### Run rendering with configs

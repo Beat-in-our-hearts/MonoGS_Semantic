@@ -1,0 +1,19 @@
+# Agent settings
+default_agent: 0
+gpu_id: 0
+width: 1200 #1280
+height: 680 #960
+hfov: 90
+sensor_height: 0
+
+color_sensor: true  # RGB sensor
+semantic_sensor: true # Semantic sensor
+depth_sensor: true  # Depth sensor
+enable_semantics: true
+lighting: True # If lighting is enabled, use mesh.ply, otherwise use habitat/mesh_semantic.ply
+frame_format: "six_num" # for 000123.png else 123.png
+
+root_path: "/path/to/Replica-Dataset/replica_v1"
+info_semantic_path: "habitat/info_semantic.json" # instance2class_mapping
+scenes_list: ["office_0", "office_1", "office_2", "office_3", "office_4", "room_0", "room_1", "room_2"]
+save_root_path: "/path/to/dataset/replica"
