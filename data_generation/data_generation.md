@@ -41,3 +41,5 @@ We put the camera intrinsic in `Replica_empty/cam_params.json`.
 In config file, `width: 1200 hfov:90(deg)` means `"camera": {"w": 1200,"h": 680,"fx": 600.0,"fy": 600.0,"cx": 599.5,"cy": 339.5}`
 
 If you want to render HDR images, check the `lighting: True`.
+
+> NOTE: The default depth sensor scale is `1000`.
