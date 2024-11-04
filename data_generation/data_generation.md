@@ -12,7 +12,10 @@ cd Replica-Dataset
 This will download 17 zip files, totaling `34GB` of data.
 
 ### 2.Copy the `Replica_empty`
-The `traj.txt` storage random camera poses. Please put in `dataset` and rename `replica`.
+The `traj.txt` file stores random camera poses. Please place it in the `dataset` directory and rename it to `replica`.
+```
+cp -r Replica_empty/ /path/to/dataset/replica
+```
 
 ### 3.Rendering 2D Images
 
