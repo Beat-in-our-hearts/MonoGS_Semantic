@@ -9,10 +9,10 @@ cd Replica-Dataset
 ./download.sh ./replica_v1
 ```
 
-This will download 17 zip files, totaling '34GB' of data.
+This will download 17 zip files, totaling `34GB` of data.
 
-### 2.Copy the 'Replica_empty'
-The 'traj.txt' storage random camera poses. Please put in 'dataset' and rename 'replica'.
+### 2.Copy the `Replica_empty`
+The `traj.txt` storage random camera poses. Please put in `dataset` and rename `replica`.
 
 ### 3.Rendering 2D Images
 
@@ -33,8 +33,8 @@ python habitat_renderer.py --config replica_render_config_vMAP.yaml
 ```
 
 #### (Options)
-We put the camera intrinsic in 'Replica_empty/cam_params.json'.
+We put the camera intrinsic in `Replica_empty/cam_params.json`.
 
-In config file, 'width: 1200 hfov:90(deg)' means '"camera": {"w": 1200,"h": 680,"fx": 600.0,"fy": 600.0,"cx": 599.5,"cy": 339.5}'
+In config file, `width: 1200 hfov:90(deg)` means `"camera": {"w": 1200,"h": 680,"fx": 600.0,"fy": 600.0,"cx": 599.5,"cy": 339.5}`
 
-If you want to render HDR images, check the 'lighting: True'.
+If you want to render HDR images, check the `lighting: True`.
