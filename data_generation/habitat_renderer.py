@@ -216,7 +216,7 @@ def main():
         base_config = yaml.safe_load(f)
         
     for scene in base_config["scenes_list"]:
-        config = base_config
+        config = base_config.copy()
         # NOTE: If lighting is enabled, use mesh.ply, otherwise use mesh_semantic.ply
         if config["lighting"]:
             config["scene_file"] = os.path.join(config["root_path"], scene, "mesh.ply")
@@ -257,7 +257,7 @@ def main_single(config):
     end_time = time.time()
     sim.close()
     print("-----Finish Habitat Rendering, Showing Trajectories.-----")
-    print("Average rendering time per image is {} seconds.".format((end_time-start_time)/Ts_cam2world.shape[0]))
+    print("Average rendering time per image is {} seconds.\n".format((end_time-start_time)/Ts_cam2world.shape[0]))
 
 if __name__ == "__main__":
     main()
