@@ -48,8 +48,9 @@ class ReplicaParser:
 class ReplicaParser_V2:
     def __init__(self, input_folder):
         self.input_folder = input_folder
-        self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb/rgb_*.jpg"))
+        self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb/rgb_*.png"))
         self.depth_paths = sorted(glob.glob(f"{self.input_folder}/depth/depth_*.png"))
+        self.semantic_paths = sorted(glob.glob(f"{self.input_folder}/semantic/semantic_*.png"))
         self.n_img = len(self.color_paths)
         self.load_poses(f"{self.input_folder}/traj.txt")
 

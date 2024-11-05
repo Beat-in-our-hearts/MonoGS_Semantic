@@ -35,11 +35,20 @@ Change path in configs.
 python habitat_renderer.py --config replica_render_config_vMAP.yaml 
 ```
 
-#### (Options)
+### 4.Options
+#### Change camera intrinsic
 We put the camera intrinsic in `Replica_empty/cam_params.json`.
 
 In config file, `width: 1200 hfov:90(deg)` means `"camera": {"w": 1200,"h": 680,"fx": 600.0,"fy": 600.0,"cx": 599.5,"cy": 339.5}`
 
-If you want to render HDR images, check the `lighting: True`.
+#### Render hdr image
+If you want to render HDR images, check the `lighting: True` in config or run below command with args `--lighting`. After run **agian**, you will get `rgb_hdr` folder. Delete orignal rgb folder and rename `rgb_hdr` to `rgb`.
+```
+python habitat_renderer.py --config replica_render_config_vMAP.yaml --lighting
+```
+#### Change depth scale
+The default depth sensor scale is `1000`. If you want to get the vis_depth image, rub below command with args `--depth_scale` `--depth_only`. Please change `scale` in `Replica_empty/cam_params.json`.
 
-> NOTE: The default depth sensor scale is `1000`.
+```
+python habitat_renderer.py --config replica_render_config_vMAP.yaml --depth_scale 6553.5 --depth_only
+```

@@ -208,7 +208,7 @@ class LSeg_FeatureExtractor:
             rgb_render = rgb_render.convert("RGB")
             del image_features, text_features, logits_per_image, out
             torch.cuda.empty_cache()
-            output = {"rgb_render": rgb_render, "patches": patches}
+            output = {"rgb_render": np.array(rgb_render), "patches": patches}
         return output
     
     def draw_patches(self, patches, save_path):

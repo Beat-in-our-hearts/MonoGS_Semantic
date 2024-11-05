@@ -109,7 +109,6 @@ class FrontEnd_Track(mp.Process):
                 os.makedirs(self.save_vis_semantic_dir)
             # Feature Extractor
             self.feature_extractor = LSeg_FeatureExtractor(debug=True)
-            self.feature_extractor.eval()
             
             # CNN Decoder to upsample semantic features
             self.decoder_init = True
@@ -473,7 +472,10 @@ class FrontEnd_Track(mp.Process):
         if self.semantic_flag:
             # NOTE: [add feature map to the gaussians] cur_semantic_feature: numpy array of shape (H, W, C)
             gt_img = viewpoint.original_image.cuda()
-            cur_semantic_feature, cur_vis_feature, _ = self.feature_extractor.extract_feature(gt_img)
+            output = self.feature_extractor.extract_feature(gt_img)
+            cur_semantic_feature = output["numpy_feature"]
+            cur_vis_feature = output["rgb_render"]
+            # cur_semantic_feature, cur_vis_feature, _ = self.feature_extractor.extract_feature(gt_img)
             if self.save_semantic: # NOTE： save semantic feature
                 semantic_path = os.path.join(self.save_semantic_dir, f"semantic_feature_{cur_frame_idx}.npy")
                 np.save(semantic_path, cur_semantic_feature)

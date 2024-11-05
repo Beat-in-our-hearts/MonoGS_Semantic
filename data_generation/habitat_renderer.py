@@ -119,31 +119,44 @@ def init_habitat(config) :
 
     return sim, hs_cfg, config
 
-def save_renders(save_path, observation, enable_semantic, suffix=""):
-    save_path_rgb = os.path.join(save_path, "rgb")
-    save_path_depth = os.path.join(save_path, "depth")
-    save_path_sem_class = os.path.join(save_path, "semantic_class")
-    save_path_sem_instance = os.path.join(save_path, "semantic_instance")
+def save_renders(save_path, observation, enable_semantic, suffix="", depth_scale = 1000.0, mode=None):
+    
+    scale_ratio = depth_scale / 1000.0
+    
+    if mode is None:
+        save_path_rgb = os.path.join(save_path, "rgb")
+        save_path_depth = os.path.join(save_path, "depth")
+        save_path_sem_class = os.path.join(save_path, "semantic_class")
+        save_path_sem_instance = os.path.join(save_path, "semantic_instance")
 
-    if not os.path.exists(save_path_rgb):
-        os.makedirs(save_path_rgb)
-    if not os.path.exists(save_path_depth):
-        os.makedirs(save_path_depth)
-    if not os.path.exists(save_path_sem_class):
-        os.makedirs(save_path_sem_class)
-    if not os.path.exists(save_path_sem_instance):
-        os.makedirs(save_path_sem_instance)
+        if not os.path.exists(save_path_rgb):
+            os.makedirs(save_path_rgb)
+        if not os.path.exists(save_path_depth):
+            os.makedirs(save_path_depth)
+        if not os.path.exists(save_path_sem_class):
+            os.makedirs(save_path_sem_class)
+        if not os.path.exists(save_path_sem_instance):
+            os.makedirs(save_path_sem_instance)
+        
+        cv2.imwrite(os.path.join(save_path_rgb, "rgb{}.png".format(suffix)), observation["color_sensor"][:,:,::-1])  # change from RGB to BGR for opencv write
+        cv2.imwrite(os.path.join(save_path_depth, "depth{}.png".format(suffix)), (observation["depth_sensor_mm"]*scale_ratio).astype(np.uint16))
 
-    cv2.imwrite(os.path.join(save_path_rgb, "rgb{}.png".format(suffix)), observation["color_sensor"][:,:,::-1])  # change from RGB to BGR for opencv write
-    cv2.imwrite(os.path.join(save_path_depth, "depth{}.png".format(suffix)), observation["depth_sensor_mm"])
+        if enable_semantic:
+            cv2.imwrite(os.path.join(save_path_sem_class, "semantic_class{}.png".format(suffix)), observation["semantic_class"])
+            cv2.imwrite(os.path.join(save_path_sem_class, "vis_sem_class{}.png".format(suffix)), observation["vis_sem_class"][:,:,::-1])
 
-    if enable_semantic:
-        cv2.imwrite(os.path.join(save_path_sem_class, "semantic_class{}.png".format(suffix)), observation["semantic_class"])
-        cv2.imwrite(os.path.join(save_path_sem_class, "vis_sem_class{}.png".format(suffix)), observation["vis_sem_class"][:,:,::-1])
-
-        cv2.imwrite(os.path.join(save_path_sem_instance, "semantic_instance{}.png".format(suffix)), observation["semantic_instance"])
-        cv2.imwrite(os.path.join(save_path_sem_instance, "vis_sem_instance{}.png".format(suffix)), observation["vis_sem_instance"][:,:,::-1])
-
+            cv2.imwrite(os.path.join(save_path_sem_instance, "semantic_instance{}.png".format(suffix)), observation["semantic_instance"])
+            cv2.imwrite(os.path.join(save_path_sem_instance, "vis_sem_instance{}.png".format(suffix)), observation["vis_sem_instance"][:,:,::-1])
+    elif mode == "hdr":
+        save_path_rgb = os.path.join(save_path, "rgb_hdr")
+        if not os.path.exists(save_path_rgb):
+            os.makedirs(save_path_rgb)
+        cv2.imwrite(os.path.join(save_path_rgb, "rgb{}.png".format(suffix)), observation["color_sensor"][:,:,::-1]) 
+    elif mode == 'depth_only':
+        save_path_depth = os.path.join(save_path, "depth")
+        if not os.path.exists(save_path_depth):
+            os.makedirs(save_path_depth)
+        cv2.imwrite(os.path.join(save_path_depth, "depth{}.png".format(suffix)), (observation["depth_sensor_mm"]*scale_ratio).astype(np.uint16))
 
 def render(sim, config):
     """Return the sensor observations and ground truth pose"""
@@ -209,11 +222,22 @@ def main():
     parser.add_argument('--config', type=str,
                         default="./data_generation/replica_render_config_vMAP.yaml",
                         help='the path to custom config file.')
+    parser.add_argument("--lighting", action="store_true",
+                        help="Enable lighting in the scene.")
+    parser.add_argument("--depth_only", action="store_true",
+                        help="Render depth only.")
+    parser.add_argument("--depth_scale", type=float, default=1000.0,
+                        help="Depth scale factor.")
     args = parser.parse_args()
     """Initialize the config dict and Habitat simulator"""
     # Read YAML file
     with open(args.config, 'r') as f:
         base_config = yaml.safe_load(f)
+    if args.lighting:
+        base_config["render_mode"] = 'hdr'
+    if args.depth_only:
+        base_config["render_mode"] = 'depth_only'
+    base_config['depth_scale'] = args.depth_scale
         
     for scene in base_config["scenes_list"]:
         config = base_config.copy()
@@ -252,7 +276,7 @@ def main_single(config):
         observation = render(sim, config)
 
         suffix_id = "_{:06d}".format(i) if config["frame_format"] == "six_num" else "_{}".format(i)
-        save_renders(config["save_path"], observation, config["enable_semantics"], suffix_id)
+        save_renders(config["save_path"], observation, config["enable_semantics"], suffix_id, depth_scale=config["depth_scale"], mode=config["render_mode"])
 
     end_time = time.time()
     sim.close()
