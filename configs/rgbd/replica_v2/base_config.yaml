@@ -9,11 +9,13 @@ Results:
 
 Dataset:
   sensor_type: 'depth'
-  pcd_downsample: 64
-  pcd_downsample_init: 32
+  pcd_downsample: 512
+  pcd_downsample_init: 256
   adaptive_pointsize: True
   point_size: 0.05
   type: 'replica_v2'
+  hdr_enable: True
+  semantic_enable: True
   Calibration:
     fx: 600.0
     fy: 600.0
@@ -78,7 +80,7 @@ opt_params:
   opacity_reset_interval: 3000
   densify_from_iter: 500
   densify_until_iter: 15000
-  densify_grad_threshold: 0.0002
+  densify_grad_threshold: 0.02
 
 model_params:
   sh_degree: 0
