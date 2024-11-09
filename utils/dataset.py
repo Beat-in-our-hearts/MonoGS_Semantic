@@ -49,7 +49,7 @@ class ReplicaParser_V2:
     def __init__(self, input_folder, hdr=False):
         self.input_folder = input_folder
         if hdr:
-            self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb_hdr/rgb_*.hdr"))
+            self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb_hdr/rgb_*.png"))
         else:
             self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb/rgb_*.png"))
         self.depth_paths = sorted(glob.glob(f"{self.input_folder}/depth/depth_*.png"))
@@ -367,6 +367,8 @@ class MonocularDataset_V2(BaseDataset):
 
         image = np.array(Image.open(color_path)) # PIL open slower than cv2
         depth = None
+        semantic = None
+        vis_semantic = None
 
         if self.disorted:
             image = cv2.remap(image, self.map1x, self.map1y, cv2.INTER_LINEAR)
@@ -531,12 +533,15 @@ class ReplicaDataset(MonocularDataset):
 class ReplicaDataset_V2(MonocularDataset_V2):
     def __init__(self, args, path, config):
         super().__init__(args, path, config)
-        hdr = config["Dataset"]["hdr_enabled"] if "hdr_enabled" in config["Dataset"].keys() else False
+        hdr = config["Dataset"]["hdr_enable"] if "hdr_enable" in config["Dataset"].keys() else False
+        print(f"hdr: {hdr}")
         dataset_path = config["Dataset"]["dataset_path"]
         parser = ReplicaParser_V2(dataset_path, hdr)
         self.num_imgs = parser.n_img
         self.color_paths = parser.color_paths
         self.depth_paths = parser.depth_paths
+        self.semantic_paths = parser.semantic_paths
+        self.vis_semantic_paths = parser.vis_semantic_paths
         self.poses = parser.poses
 
 

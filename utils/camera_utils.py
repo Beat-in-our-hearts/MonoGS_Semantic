@@ -3,7 +3,7 @@ from torch import nn
 import numpy as np
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from utils.slam_utils import image_gradient, image_gradient_mask
-
+from utils.dataset import ReplicaDataset_V2
 from utils.common_var import SEMANTIC_FEATURES_DIM
 
 class Camera(nn.Module):
@@ -71,7 +71,10 @@ class Camera(nn.Module):
 
     @staticmethod
     def init_from_dataset(dataset, idx, projection_matrix):
-        gt_color, gt_depth, gt_pose = dataset[idx]
+        if isinstance(dataset, ReplicaDataset_V2):
+            gt_color, gt_depth, gt_pose, semantic, vis_semantic = dataset[idx]
+        else:
+            gt_color, gt_depth, gt_pose = dataset[idx]
         return Camera(
             idx,
             gt_color,
@@ -152,7 +155,7 @@ class Camera(nn.Module):
         gray_grad_h = gray_grad_h * mask_h
         img_grad_intensity = torch.sqrt(gray_grad_v**2 + gray_grad_h**2)
 
-        if config["Dataset"]["type"] == "replica":
+        if config["Dataset"]["type"] == "replica" or config["Dataset"]["type"] == "replica_v2":
             row, col = 32, 32
             multiplier = edge_threshold
             _, h, w = self.original_image.shape
