@@ -12,13 +12,20 @@ import torchmetrics
 # add mixed precision
 import torch.amp as amp
 import numpy as np
+import os
 
 from encoding.utils import SegmentationMetric
 from encoding.models import get_segmentation_model
 from encoding.nn import SegmentationLosses
 from encoding.utils import batch_pix_accuracy, batch_intersection_union
 
-from ..data import get_dataset, get_available_datasets
+printcurrent_dir = os.getcwd()
+print(printcurrent_dir)
+
+if "lseg_encoder" in printcurrent_dir:
+    from data import get_dataset, get_available_datasets
+else:
+    from ..data import get_dataset, get_available_datasets
 
 class LSegmentationModule(pl.LightningModule):
     def __init__(self, data_path, dataset, batch_size, base_lr, max_epochs, **kwargs):

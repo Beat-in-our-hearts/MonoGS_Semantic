@@ -221,35 +221,36 @@ class LSeg_FeatureExtractor:
 
     @torch.no_grad()
     def vis_feature(self, image, outname='test', outdir='vis'):
-        image_tensor = self.preprocess(image)
-        outputs = self.evaluator.parallel_forward(image_tensor)[0]
-        predicts = torch.max(outputs, 1)[1].cpu().numpy()
-        
-        # save mask
-        masks = utils.get_mask_pallete(predicts, 'detail')
-        masks.save(os.path.join(outdir, outname+'.png'))
-        
-        # save vis
-        masks_tensor = torch.tensor(np.array(masks.convert("RGB"), "f")) / 255.0
-        vis_img = (image_tensor[0] + 1) / 2.
-        vis_img = vis_img.permute(1, 2, 0)  # ->hwc
-        vis1 = vis_img
-        vis2 = vis_img * 0.4 + masks_tensor * 0.6
-        vis3 = masks_tensor
-        vis = torch.cat([vis1, vis2, vis3], dim=1)
-        Image.fromarray((vis.cpu().numpy() * 255).astype(np.uint8)).save(os.path.join(outdir, outname+"_vis.png"))
+        with autocast("cuda"):
+            image_tensor = self.preprocess(image)
+            outputs = self.evaluator.parallel_forward(image_tensor)[0]
+            predicts = torch.max(outputs, 1)[1].cpu().numpy()
+            
+            # save mask
+            masks = utils.get_mask_pallete(predicts, 'detail')
+            masks.save(os.path.join(outdir, outname+'.png'))
+            
+            # save vis
+            masks_tensor = torch.tensor(np.array(masks.convert("RGB"), "f")) / 255.0
+            vis_img = (image_tensor[0] + 1) / 2.
+            vis_img = vis_img.permute(1, 2, 0)  # ->hwc
+            vis1 = vis_img
+            vis2 = vis_img * 0.4 + masks_tensor * 0.6
+            vis3 = masks_tensor
+            vis = torch.cat([vis1, vis2, vis3], dim=1)
+            Image.fromarray((vis.cpu().numpy() * 255).astype(np.uint8)).save(os.path.join(outdir, outname+"_vis.png"))
 
-        # save label vis
-        seg, patches = get_legend_patch(predicts, adepallete, self.labels)
-        seg = seg.convert("RGBA")
-        plt.figure()
-        plt.axis('off')
-        plt.imshow(seg)
-        plt.legend(handles=patches, prop={'size': 8}, ncol=4)
-        plt.savefig(os.path.join(outdir, outname+"_legend.png"), format="png", dpi=300, bbox_inches="tight")
-        plt.clf()
-        plt.close()
-        
+            # save label vis
+            seg, patches = get_legend_patch(predicts, adepallete, self.labels)
+            seg = seg.convert("RGBA")
+            plt.figure()
+            plt.axis('off')
+            plt.imshow(seg)
+            plt.legend(handles=patches, prop={'size': 8}, ncol=4)
+            plt.savefig(os.path.join(outdir, outname+"_legend.png"), format="png", dpi=300, bbox_inches="tight")
+            plt.clf()
+            plt.close()
+            
 class LSeg_FeatureDecoder():
     def __init__(self, debug=False):
         self.debug = debug
@@ -291,3 +292,4 @@ class LSeg_FeatureDecoder():
             torch.cuda.empty_cache()
             output = {"rgb_render": rgb_render, "patches": patches}
         return output
+    

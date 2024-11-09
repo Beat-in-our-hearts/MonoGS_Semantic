@@ -445,6 +445,10 @@ def test(args):
             mask = utils.get_mask_pallete(predict - 1, 'detail')
             outname = os.path.splitext(impath)[0] + ".png"
             mask.save(os.path.join(outdir, outname))
+            
+            predict_name = os.path.splitext(impath)[0] + "_semantic.png"
+            Image.fromarray(predict[0].astype(np.uint8)).save(os.path.join(outdir, predict_name))
+            # np.save(os.path.join(outdir, predict_name), predict)
 
             # vis from accumulation of prediction
             mask = torch.tensor(np.array(mask.convert("RGB"), "f")) / 255.0

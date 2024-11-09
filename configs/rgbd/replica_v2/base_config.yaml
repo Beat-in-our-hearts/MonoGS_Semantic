@@ -2,7 +2,7 @@ Results:
   save_results: True
   save_dir: "results"
   save_trj: True
-  save_trj_kf_intv: 20
+  save_trj_kf_intv: 10
   use_gui: True
   eval_rendering: False
   use_wandb: False
@@ -10,7 +10,7 @@ Results:
 Dataset:
   sensor_type: 'depth'
   pcd_downsample: 512
-  pcd_downsample_init: 256
+  pcd_downsample_init: 64
   adaptive_pointsize: True
   point_size: 0.05
   type: 'replica_v2'
@@ -46,7 +46,7 @@ Training:
   gaussian_extent: 1.0
   gaussian_reset: 2001
   size_threshold: 20
-  kf_interval: 4
+  kf_interval: 5
   window_size: 10
   pose_window: 5
   edge_threshold: 4
