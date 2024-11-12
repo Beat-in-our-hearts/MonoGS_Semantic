@@ -6,7 +6,9 @@ from datetime import datetime
 from typing import Dict, List, Union
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.multiprocessing as mp
+import torch.nn.functional as F
 from torch.optim.optimizer import Optimizer
 import yaml
 from munch import munchify
@@ -25,8 +27,9 @@ from utils.camera_utils import Camera
 from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_tracking, get_median_depth, get_loss_mapping
 from utils.multiprocessing_utils import clone_obj
-
+from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from eval.eval_metrics import Eval_Tracking, Eval_Mapping, Eval_Semantic
+from utils.common_var import *
 
 class SLAM:
     def __init__(self, config, save_dir=None):
@@ -132,19 +135,21 @@ class SLAM:
         self.pause = False
         
     def __setup_mapping_params(self):
-        
         self.map_iteration_count = 0
-        
         self.map_initialized = False
         
         
-        
-        
     def __setup_semantic_params(self):
-        self.semantic_flag = False
+        self.semantic_flag = True
         self.decoder_init = False
         self.save_semantic = True
         self.save_frame_visualize = True
+        
+    def semantic_init(self):
+        # CNN Decoder to upsample semantic features
+        self.decoder_init = True
+        self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, LSeg_FEATURES_DIM, kernel_size=1).to("cuda")
+        self.cnn_decoder_optimizer = torch.optim.Adam(self.cnn_decoder.parameters(), lr=0.0005)
         
     def run_gui(self):
         if self.use_gui: 
@@ -393,10 +398,14 @@ class SLAM:
         self.gaussians.extend_from_pcd_seq(viewpoint, kf_id=frame_idx, init=init, scale=scale, depthmap=depth_map)
     
     def map_init(self, cur_frame_idx, viewpoint:Camera):
+        if self.semantic_flag:
+            gt_semantic_path = self.dataset.get_gt_semantic(cur_frame_idx)
+            gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
         for mapping_iteration in range(self.init_itr_num):
             self.map_iteration_count += 1
-            render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
-            (image, viewspace_point_tensor, visibility_filter, radii, depth, opacity, n_touched,) = (
+            render_semantic_flag = self.semantic_flag and mapping_iteration > self.init_itr_num - MAPPING_START_ITR
+            render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=render_semantic_flag)
+            (image, viewspace_point_tensor, visibility_filter, radii, depth, opacity, n_touched, feature_map) = (
                 render_pkg["render"],
                 render_pkg["viewspace_points"],
                 render_pkg["visibility_filter"],
@@ -404,9 +413,19 @@ class SLAM:
                 render_pkg["depth"],
                 render_pkg["opacity"],
                 render_pkg["n_touched"],
+                render_pkg["feature_map"]
             )
             loss_init = get_loss_mapping(self.config, image, depth, viewpoint, opacity, initialization=True)
+            if render_semantic_flag:
+                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                             size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                                            mode="bilinear", align_corners=True).squeeze(0))
+                l1_feature = l1_loss(feature_map, gt_feature)
+                loss_init += l1_feature
+                if mapping_iteration % 20 == 0:
+                    print(f"Init Iteration: {mapping_iteration}, Loss: {loss_init.item()}")
             loss_init.backward()
+
             with torch.no_grad():
                 # update the max radii of the gaussians
                 self.gaussians.max_radii2D[visibility_filter] = torch.max(
@@ -423,6 +442,8 @@ class SLAM:
                 
                 self.gaussians.optimizer.step()
                 self.gaussians.optimizer.zero_grad(set_to_none=True)
+                self.cnn_decoder_optimizer.step()
+                self.cnn_decoder_optimizer.zero_grad()
         
         self.occ_aware_visibility[cur_frame_idx] = (n_touched > 0).long()    
         Log("Initialized map")
@@ -438,8 +459,14 @@ class SLAM:
         random_update_num = 2
         # Local BA optimizer
         pose_optimizer = self.track_update_optimizer(BA_flag=True)
+        gt_feature_stack = []
+        if self.semantic_flag:
+            for i in range(len(self.current_window)):
+                gt_semantic_path = self.dataset.get_gt_semantic(self.current_window[i])
+                gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
+                gt_feature_stack.append(gt_feature)
         
-        for _ in range(iters):
+        for mapping_iteration in range(iters):
             self.map_iteration_count += 1
             loss_mapping = 0
             viewspace_point_tensor_acm = []
@@ -449,8 +476,9 @@ class SLAM:
             
             for cam_idx in range(len(self.current_window)):
                 viewpoint = viewpoint_stack[cam_idx]
-                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
-                (image, viewspace_point_tensor, visibility_filter, radii, depth, opacity, n_touched,) = (
+                render_semantic_flag = self.semantic_flag and mapping_iteration > iters - MAPPING_ITR
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=render_semantic_flag)
+                (image, viewspace_point_tensor, visibility_filter, radii, depth, opacity, n_touched, feature_map) = (
                     render_pkg["render"],
                     render_pkg["viewspace_points"],
                     render_pkg["visibility_filter"],
@@ -458,8 +486,17 @@ class SLAM:
                     render_pkg["depth"],
                     render_pkg["opacity"],
                     render_pkg["n_touched"],
+                    render_pkg["feature_map"]
                 )
                 loss_mapping += get_loss_mapping(self.config, image, depth, viewpoint, opacity)
+                if render_semantic_flag:
+                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                                size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                                                mode="bilinear", align_corners=True).squeeze(0))
+                    gt_feature = gt_feature_stack[cam_idx]
+                    l1_feature = l1_loss(feature_map, gt_feature)
+                    loss_mapping += l1_feature
+
                 viewspace_point_tensor_acm.append(viewspace_point_tensor)
                 visibility_filter_acm.append(visibility_filter)
                 radii_acm.append(radii)
@@ -573,12 +610,13 @@ class SLAM:
         cur_frame_idx = 0
         self.run_gui()
         while True:
-            if cur_frame_idx > 100:
+            if cur_frame_idx > len(self.dataset) - 1:
                 self.eval()
                 break
             elif len(self.keyframe_indices) % self.save_trj_kf_intv == 0 \
                     and len(self.keyframe_indices) and self.keyframe_indices[-1] == cur_frame_idx-1:
                 output = self.eval_keyframes()
+                self.gaussians.save_ply(path=os.path.join(self.save_dir, f"kf_{cur_frame_idx}.ply"))
                 print(output) 
                 
             # get the current frame
@@ -589,10 +627,14 @@ class SLAM:
             # reset the track and map
             if self.track_reset_flag:
                 print("reset")
+                self.semantic_init()
                 self.track_reset(cur_frame_idx, viewpoint)
                 depth_map = self.map_rest()
                 self.map_add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map, init=True)
                 self.map_init(cur_frame_idx, viewpoint)
+                decoder_state_dict = self.cnn_decoder.state_dict()
+                state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
+                self.gaussians.semantic_decoder = state_dict_cpu
                 cur_frame_idx += 1
                 continue
             
@@ -602,7 +644,7 @@ class SLAM:
             # tracking
             track_start_time = time.time()
             render_pkg = self.tracking(cur_frame_idx, viewpoint)
-            ate_output = Eval_frame_pose(viewpoint, monocular=self.monocular)
+            # ate_output = Eval_frame_pose(viewpoint, monocular=self.monocular)
             print(f"[{cur_frame_idx}] track time: {time.time()-track_start_time}")
             
             current_window_dict = {}

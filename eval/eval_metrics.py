@@ -103,7 +103,7 @@ def Eval_Mapping(cameras:Dict[int, Camera], dataset,
     
     for idx, frame in tqdm(cameras.items(), desc="Evaluating Mapping"):
         if isinstance(dataset, ReplicaDataset_V2):
-            gt_color, gt_depth, gt_pose, semantic, vis_semantic = dataset[idx]
+            gt_color, gt_depth, gt_pose, semantic_dict = dataset[idx]
         else:
             gt_color, gt_depth, _ = dataset[idx]
         mask = gt_color > 0

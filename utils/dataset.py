@@ -55,6 +55,7 @@ class ReplicaParser_V2:
         self.depth_paths = sorted(glob.glob(f"{self.input_folder}/depth/depth_*.png"))
         self.semantic_paths = sorted(glob.glob(f"{self.input_folder}/semantic_class/semantic_class_*.png"))
         self.vis_semantic_paths = sorted(glob.glob(f"{self.input_folder}/semantic_class/vis_sem_class_*.png"))
+        self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_lseg/rgb_*_fmap_CxHxW.pt"))
         self.n_img = len(self.color_paths)
         self.load_poses(f"{self.input_folder}/traj.txt")
 
@@ -360,6 +361,9 @@ class MonocularDataset_V2(BaseDataset):
                 "translation": np.zeros(3),
             },
         }
+    
+    def get_gt_semantic(self, idx):
+        return self.pred_semantic_paths[idx]
 
     def __getitem__(self, idx):
         color_path = self.color_paths[idx]
@@ -367,8 +371,7 @@ class MonocularDataset_V2(BaseDataset):
 
         image = np.array(Image.open(color_path)) # PIL open slower than cv2
         depth = None
-        semantic = None
-        vis_semantic = None
+        semantic_dict = {}
 
         if self.disorted:
             image = cv2.remap(image, self.map1x, self.map1y, cv2.INTER_LINEAR)
@@ -384,6 +387,9 @@ class MonocularDataset_V2(BaseDataset):
             vis_semantic = np.array(Image.open(vis_semantic_path))
             semantic = torch.from_numpy(semantic).to(device=self.device, dtype=self.dtype)
             vis_semantic = torch.from_numpy(vis_semantic).to(device=self.device, dtype=self.dtype)
+            semantic_dict = {"semantic": semantic, 
+                             "vis_semantic": vis_semantic,
+                            "pred_semantic": self.pred_semantic_paths[idx]}
         image = (
             torch.from_numpy(image / 255.0)
             .clamp(0.0, 1.0)
@@ -391,8 +397,7 @@ class MonocularDataset_V2(BaseDataset):
             .to(device=self.device, dtype=self.dtype)
         )
         pose = torch.from_numpy(pose).to(device=self.device)
-        return image, depth, pose, semantic, vis_semantic
-
+        return image, depth, pose, semantic_dict
 
 class StereoDataset(BaseDataset):
     def __init__(self, args, path, config):
@@ -542,6 +547,7 @@ class ReplicaDataset_V2(MonocularDataset_V2):
         self.depth_paths = parser.depth_paths
         self.semantic_paths = parser.semantic_paths
         self.vis_semantic_paths = parser.vis_semantic_paths
+        self.pred_semantic_paths = parser.pred_semantic_paths
         self.poses = parser.poses
 
 

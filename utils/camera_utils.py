@@ -72,7 +72,7 @@ class Camera(nn.Module):
     @staticmethod
     def init_from_dataset(dataset, idx, projection_matrix):
         if isinstance(dataset, ReplicaDataset_V2):
-            gt_color, gt_depth, gt_pose, semantic, vis_semantic = dataset[idx]
+            gt_color, gt_depth, gt_pose, semantic_dict = dataset[idx]
         else:
             gt_color, gt_depth, gt_pose = dataset[idx]
         return Camera(
