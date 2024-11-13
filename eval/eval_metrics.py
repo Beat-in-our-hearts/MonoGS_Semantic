@@ -3,17 +3,19 @@ import json
 import os
 from tqdm import tqdm
 from typing import Dict, List, Union
-
+from PIL import Image
 import cv2
 import evo
 import numpy as np
 import torch
+import torch.nn as nn
 from evo.core import metrics, trajectory
 from evo.core.metrics import PoseRelation, Unit
 from evo.core.trajectory import PosePath3D, PoseTrajectory3D
 from evo.tools import plot
 from evo.tools.plot import PlotMode
 from evo.tools.settings import SETTINGS
+import torch.nn.functional as F
 from matplotlib import pyplot as plt
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
@@ -25,13 +27,18 @@ from gaussian_splatting.utils.system_utils import mkdir_p
 from utils.logging_utils import Log
 from utils.camera_utils import Camera
 from utils.dataset import ReplicaDataset_V2
+from utils.common_var import *
+from eval.segmentationMetric import SegmentationMetric
+from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureDecoder
 
 def gen_pose_matrix(R, T):
     pose = np.eye(4)
     pose[0:3, 0:3] = R.cpu().numpy()
     pose[0:3, 3] = T.cpu().numpy()
-    return pose  
+    return pose 
 
+parent_directory = os.path.dirname(os.path.abspath(__file__))
+labels_path = os.path.join(parent_directory, 'labels/replica_ade20k_match_dict.json')
 # def Eval_frame_pose(frame:Camera, monocular=False):
 #     traj_est = [np.linalg.inv(gen_pose_matrix(frame.R, frame.T))]
 #     traj_gt  = [np.linalg.inv(gen_pose_matrix(frame.R_gt, frame.T_gt))]
@@ -147,13 +154,75 @@ def Eval_Mapping(cameras:Dict[int, Camera], dataset,
         Log(f"SSIM: {mean_ssim}", tag="Eval")
         Log(f"LPIPS: {mean_lpips}", tag="Eval")
 
+    torch.cuda.empty_cache()
     return output
+
+def transform_labels(labels, id_dict):
+    reslut = labels.copy()
+    for key, value in id_dict.items():
+        reslut[labels == key] = value
+    return reslut
 
 def Eval_Semantic(cameras:Dict[int, Camera], dataset, 
                     gaussians, pipeline_params, bg_color,
-                    save_dir, monocular=False, interval=5):
-    raise NotImplementedError("Semantic Evaluation is not implemented yet")
-
+                    save_dir=None, monocular=False, interval=5):
+    pixAcc_list = []
+    mIoU_list = []
+    # Load the feature upsample decoder
+    cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, LSeg_FEATURES_DIM, kernel_size=1).to("cuda")
+    state_dict_cpu = gaussians.semantic_decoder
+    cnn_decoder.load_state_dict({key: value.cuda() for key, value in state_dict_cpu.items()})
+    cnn_decoder.eval()
+    # Load the feature encoder
+    feature_decoder = LSeg_FeatureDecoder(debug=False)
+    # print(feature_decoder.labels)
+    # Load seg_metric
+    seg_metric = SegmentationMetric(100)
+    # Load label transform 
+    with open(labels_path) as f:
+        replica_ade20k_match_dict = json.load(f)
+    ade20k_to_replica_id = {int(key): int(value) for key, value in replica_ade20k_match_dict["ade20k_to_replica"].items()}
+    # replica_id_to_name = {int(key): value for key, value in replica_ade20k_match_dict["objects"].items()}
+    replica_synonyms_transform = {int(key): int(value) for key, value in replica_ade20k_match_dict["replica_synonyms_transform"].items()}
+    
+    with tqdm(total=len(cameras), desc="Evaluating Semantic") as pbar:
+        for idx, frame in cameras.items():
+            render_pkg = render(frame, gaussians, pipeline_params, bg_color, flag_semantic=True)
+            feature_map = render_pkg["feature_map"]
+            upsample_feature_map = cnn_decoder(feature_map)
+            output = feature_decoder.features_to_image(upsample_feature_map)
+            predict = output["predict"][0] + 1
+            predict_semantic_transform = transform_labels(predict, ade20k_to_replica_id)
+            
+            # Get GT and Mask
+            gt_semantic_path = dataset.get_gt_semantic_path(idx)
+            gt_semantic = cv2.imread(gt_semantic_path, cv2.IMREAD_GRAYSCALE)
+            gt_semantic_transform = transform_labels(gt_semantic, replica_synonyms_transform)
+            valid_mask = gt_semantic_transform > 0
+            
+            # cv2 save the semantic image
+            # print(predict_semantic_transform.shape, gt_semantic_transform.shape)
+            # np.save(f"predict_{idx}.npy", predict_semantic_transform)
+            # np.save(f"gt_{idx}.npy", gt_semantic_transform)
+            
+            # Update metrics
+            # print(predict_semantic_transform.shape, gt_semantic_transform.shape)
+            seg_metric.update(torch.tensor(predict_semantic_transform), torch.tensor(gt_semantic_transform))
+            pixAcc, mIoU = seg_metric.get()
+            pixAcc_list.append(pixAcc)
+            mIoU_list.append(mIoU)
+            pbar.update(1)
+            pbar.set_description(f"Evaluating Semantic pixAcc: {pixAcc:.4f}, mIoU: {mIoU:.4f}")
+            torch.cuda.empty_cache()
+    
+    pixAcc, mIoU = seg_metric.get()
+    output = {"pixAcc": pixAcc, "mIoU": mIoU}
+    if save_dir is not None:
+        Log(f"pixAcc: {pixAcc} mIoU: {mIoU}", tag="Eval")
+        all_output = {"pixAcc": pixAcc_list, "mIoU": mIoU_list}
+        with open(os.path.join(save_dir, 'semantic_result.json'), 'w', encoding='utf-8') as f:
+            json.dump(all_output, f, indent=4)
+    return output
 
 def run_all_metrics(cameras:Dict[int, Camera], dataset, 
                     gaussians, pipeline_params, bg_color,

@@ -9,8 +9,8 @@ Results:
 
 Dataset:
   sensor_type: 'depth'
-  pcd_downsample: 512
-  pcd_downsample_init: 64
+  pcd_downsample: 640
+  pcd_downsample_init: 96
   adaptive_pointsize: True
   point_size: 0.05
   type: 'replica_v2'
@@ -33,7 +33,7 @@ Dataset:
 
 
 Training:
-  init_itr_num: 1050
+  init_itr_num: 1000
   init_gaussian_update: 100
   init_gaussian_reset: 500
   init_gaussian_th: 0.005

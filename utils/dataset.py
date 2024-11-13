@@ -361,9 +361,13 @@ class MonocularDataset_V2(BaseDataset):
                 "translation": np.zeros(3),
             },
         }
-    
-    def get_gt_semantic(self, idx):
+        
+    def get_pred_semantic(self, idx):
         return self.pred_semantic_paths[idx]
+    
+    def get_gt_semantic_path(self, idx):
+        return self.semantic_paths[idx]
+    
 
     def __getitem__(self, idx):
         color_path = self.color_paths[idx]

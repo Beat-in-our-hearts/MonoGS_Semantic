@@ -482,7 +482,7 @@ def test(args):
             # save unnormalized image feature
             unnormalized_fmap = fmap[0]  # [512, h, w]
             unnormalized_fmap = unnormalized_fmap.cpu().numpy().astype(np.float16)
-            # torch.save(torch.tensor(unnormalized_fmap).half(), os.path.join(outdir, os.path.splitext(impath)[0] + "_fmap_CxHxW.pt"))
+            torch.save(torch.tensor(unnormalized_fmap).half(), os.path.join(outdir, os.path.splitext(impath)[0] + "_fmap_CxHxW.pt"))
 
             fmap = F.interpolate(fmap, size=(h, w), mode='bilinear', align_corners=False)  # [1, 512, h, w]
             fmap = F.normalize(fmap, dim=1)  # normalize

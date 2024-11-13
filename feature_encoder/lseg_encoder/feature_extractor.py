@@ -286,10 +286,12 @@ class LSeg_FeatureDecoder():
             logits_per_image = self.logit_scale * image_features @ text_features.t() 
             out = logits_per_image.float().view(imshape[0], imshape[2], imshape[3], -1).permute(0,3,1,2) 
             predicts = torch.max(out, 1)[1].cpu().numpy()
+            out_predicts = predicts.copy()
             rgb_render, patches = get_legend_patch(predicts, adepallete, labels_set)
             rgb_render = rgb_render.convert("RGB")
+            out_numpy = out.cpu().numpy().astype(np.float16)
             del image_features, text_features, logits_per_image, out
             torch.cuda.empty_cache()
-            output = {"rgb_render": rgb_render, "patches": patches}
+            output = {"predict": out_predicts.astype('uint8'), "output":out_numpy, "rgb_render": rgb_render, "patches": patches}
         return output
     
