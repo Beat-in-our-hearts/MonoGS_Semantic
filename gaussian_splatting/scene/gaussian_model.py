@@ -497,6 +497,17 @@ class GaussianModel:
         self.max_radii2D = torch.zeros((self._xyz.shape[0]), device="cuda")
         self.unique_kfIDs = torch.zeros((self._xyz.shape[0]))
         self.n_obs = torch.zeros((self._xyz.shape[0]), device="cpu").int()
+        
+        self.densification_postfix(new_xyz=self._xyz, 
+                                   new_features_dc=self._features_dc, 
+                                   new_features_rest=self._features_rest, 
+                                   new_opacities=self._opacity, 
+                                   new_scaling=self._scaling, 
+                                   new_rotation=self._rotation, 
+                                #    new_kf_ids=self.unique_kfIDs,
+                                #    new_n_obs=self.n_obs,
+                                   new_semantic_feature=self._semantic_feature) 
+            
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
