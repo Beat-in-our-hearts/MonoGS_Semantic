@@ -666,14 +666,12 @@ class SLAM_GUI:
             opacity = results["opacity"]
             opacity = opacity[0, :, :].detach().cpu().numpy()
             max_opacity = np.max(opacity)
-            np.save("results/opacity.npy", opacity)
             opacity = imgviz.depth2rgb(
                 opacity, min_value=0.0, max_value=max_opacity, colormap="jet"
             )
             opacity = torch.from_numpy(opacity)
             opacity = torch.permute(opacity, (2, 0, 1)).float()
             opacity = (opacity).byte().permute(1, 2, 0).contiguous().cpu().numpy()
-            Image.fromarray(opacity).save("results/opacity.png")
             render_img = o3d.geometry.Image(opacity)
         
         # [ADD Feature]

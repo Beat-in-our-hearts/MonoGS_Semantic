@@ -543,7 +543,7 @@ class ReplicaDataset_V2(MonocularDataset_V2):
     def __init__(self, args, path, config):
         super().__init__(args, path, config)
         hdr = config["Dataset"]["hdr_enable"] if "hdr_enable" in config["Dataset"].keys() else False
-        print(f"hdr: {hdr}")
+        print(f"hdr enable: {hdr}")
         dataset_path = config["Dataset"]["dataset_path"]
         parser = ReplicaParser_V2(dataset_path, hdr)
         self.num_imgs = parser.n_img

@@ -116,25 +116,26 @@ def Eval_Mapping(cameras:Dict[int, Camera], dataset,
         mask = gt_color > 0
         depth_mask = gt_color.sum(dim=0).unsqueeze(0) > 0
         
-        render_pkg = render(frame, gaussians, pipeline_params, bg_color)
+        with torch.no_grad():
+            render_pkg = render(frame, gaussians, pipeline_params, bg_color)
         
-        # Rendering Metrics
-        render_color = torch.clamp(render_pkg["render"], 0.0, 1.0)
-        render_depth = render_pkg["depth"]
-        gt_depth = torch.tensor(gt_depth, device=render_depth.device).unsqueeze(0)
-        
-        psnr_score = psnr((render_color[mask]).unsqueeze(0), (gt_color[mask]).unsqueeze(0))
-        ssim_score = ssim((render_color).unsqueeze(0), (gt_color).unsqueeze(0))
-        lpips_score = cal_lpips((render_color).unsqueeze(0), (gt_color).unsqueeze(0))
-        
-        PSNR.append(psnr_score.item())
-        SSIM.append(ssim_score.item())
-        LPIPS.append(lpips_score.item())
-        
-        # Reconstruction Metrics
-        depth_l1 = l1_loss(render_depth[depth_mask], gt_depth[depth_mask])
-        
-        DEPTH_L1.append(depth_l1.item())
+            # Rendering Metrics
+            render_color = torch.clamp(render_pkg["render"], 0.0, 1.0)
+            render_depth = render_pkg["depth"]
+            gt_depth = torch.tensor(gt_depth, device=render_depth.device).unsqueeze(0)
+            
+            psnr_score = psnr((render_color[mask]).unsqueeze(0), (gt_color[mask]).unsqueeze(0))
+            ssim_score = ssim((render_color).unsqueeze(0), (gt_color).unsqueeze(0))
+            lpips_score = cal_lpips((render_color).unsqueeze(0), (gt_color).unsqueeze(0))
+            
+            PSNR.append(psnr_score.item())
+            SSIM.append(ssim_score.item())
+            LPIPS.append(lpips_score.item())
+            
+            # Reconstruction Metrics
+            depth_l1 = l1_loss(render_depth[depth_mask], gt_depth[depth_mask])
+            
+            DEPTH_L1.append(depth_l1.item())
 
     # Compute the mean of the metrics
     mean_psnr = np.mean(PSNR)
@@ -185,35 +186,36 @@ def Eval_Semantic(cameras:Dict[int, Camera], dataset,
     # replica_id_to_name = {int(key): value for key, value in replica_ade20k_match_dict["objects"].items()}
     replica_synonyms_transform = {int(key): int(value) for key, value in replica_ade20k_match_dict["replica_synonyms_transform"].items()}
     
-    with tqdm(total=len(cameras), desc="Evaluating Semantic") as pbar:
-        for idx, frame in cameras.items():
-            render_pkg = render(frame, gaussians, pipeline_params, bg_color, flag_semantic=True)
-            feature_map = render_pkg["feature_map"]
-            upsample_feature_map = cnn_decoder(feature_map)
-            output = feature_decoder.features_to_image(upsample_feature_map)
-            predict = output["predict"][0] + 1
-            predict_semantic_transform = transform_labels(predict, ade20k_to_replica_id)
-            
-            # Get GT and Mask
-            gt_semantic_path = dataset.get_gt_semantic_path(idx)
-            gt_semantic = cv2.imread(gt_semantic_path, cv2.IMREAD_GRAYSCALE)
-            gt_semantic_transform = transform_labels(gt_semantic, replica_synonyms_transform)
-            valid_mask = gt_semantic_transform > 0
-            
-            # cv2 save the semantic image
-            # print(predict_semantic_transform.shape, gt_semantic_transform.shape)
-            # np.save(f"predict_{idx}.npy", predict_semantic_transform)
-            # np.save(f"gt_{idx}.npy", gt_semantic_transform)
-            
-            # Update metrics
-            # print(predict_semantic_transform.shape, gt_semantic_transform.shape)
-            seg_metric.update(torch.tensor(predict_semantic_transform), torch.tensor(gt_semantic_transform))
-            pixAcc, mIoU = seg_metric.get()
-            pixAcc_list.append(pixAcc)
-            mIoU_list.append(mIoU)
-            pbar.update(1)
-            pbar.set_description(f"Evaluating Semantic pixAcc: {pixAcc:.4f}, mIoU: {mIoU:.4f}")
-            torch.cuda.empty_cache()
+    with torch.no_grad():
+        with tqdm(total=len(cameras), desc="Evaluating Semantic") as pbar:
+            for idx, frame in cameras.items():
+                render_pkg = render(frame, gaussians, pipeline_params, bg_color, flag_semantic=True)
+                feature_map = render_pkg["feature_map"]
+                upsample_feature_map = cnn_decoder(feature_map)
+                output = feature_decoder.features_to_image(upsample_feature_map)
+                predict = output["predict"][0] + 1
+                predict_semantic_transform = transform_labels(predict, ade20k_to_replica_id)
+                
+                # Get GT and Mask
+                gt_semantic_path = dataset.get_gt_semantic_path(idx)
+                gt_semantic = cv2.imread(gt_semantic_path, cv2.IMREAD_GRAYSCALE)
+                gt_semantic_transform = transform_labels(gt_semantic, replica_synonyms_transform)
+                valid_mask = gt_semantic_transform > 0
+                
+                # cv2 save the semantic image
+                # print(predict_semantic_transform.shape, gt_semantic_transform.shape)
+                # np.save(f"predict_{idx}.npy", predict_semantic_transform)
+                # np.save(f"gt_{idx}.npy", gt_semantic_transform)
+                
+                # Update metrics
+                # print(predict_semantic_transform.shape, gt_semantic_transform.shape)
+                seg_metric.update(torch.tensor(predict_semantic_transform), torch.tensor(gt_semantic_transform))
+                pixAcc, mIoU = seg_metric.get()
+                pixAcc_list.append(pixAcc)
+                mIoU_list.append(mIoU)
+                pbar.update(1)
+                pbar.set_description(f"Evaluating Semantic pixAcc: {pixAcc:.4f}, mIoU: {mIoU:.4f}")
+                torch.cuda.empty_cache()
     
     pixAcc, mIoU = seg_metric.get()
     output = {"pixAcc": pixAcc, "mIoU": mIoU}

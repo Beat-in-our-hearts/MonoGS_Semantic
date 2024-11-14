@@ -9,7 +9,7 @@ Results:
 
 Dataset:
   sensor_type: 'depth'
-  pcd_downsample: 640
+  pcd_downsample: 768
   pcd_downsample_init: 96
   adaptive_pointsize: True
   point_size: 0.05

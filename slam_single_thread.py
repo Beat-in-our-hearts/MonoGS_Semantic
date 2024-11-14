@@ -11,6 +11,7 @@ import torch.nn as nn
 import torch.multiprocessing as mp
 import torch.nn.functional as F
 from torch.optim.optimizer import Optimizer
+from tqdm import tqdm
 import yaml
 import json
 from munch import munchify
@@ -296,7 +297,7 @@ class SLAM:
         return initial_depth_numpy
         
         
-    def track_is_keyframe(self, cur_frame_idx, last_keyframe_idx, cur_frame_visibility_filter, occ_aware_visibility):
+    def track_is_keyframe(self, cur_frame_idx, last_keyframe_idx, cur_frame_visibility_filter):
         # get current viewpoint and last keyframe viewpoint
         cur_viewpoint = self.cameras[cur_frame_idx]
         last_keyframe = self.cameras[last_keyframe_idx]
@@ -312,8 +313,8 @@ class SLAM:
         check1_dist = dist > self.kf_translation * self.median_depth
         check2_min_dist = dist > self.kf_min_translation * self.median_depth
         # Common visibility of Gauss points: self.kf_overlap
-        union = torch.logical_or(cur_frame_visibility_filter, occ_aware_visibility[last_keyframe_idx]).count_nonzero()
-        intersection = torch.logical_and(cur_frame_visibility_filter, occ_aware_visibility[last_keyframe_idx]).count_nonzero()
+        union = torch.logical_or(cur_frame_visibility_filter, self.occ_aware_visibility[last_keyframe_idx]).count_nonzero()
+        intersection = torch.logical_and(cur_frame_visibility_filter, self.occ_aware_visibility[last_keyframe_idx]).count_nonzero()
         point_ratio = intersection / union
         check3_visibility = point_ratio < self.kf_overlap
         if check_full_window:
@@ -322,7 +323,7 @@ class SLAM:
             return (check3_visibility and check_time)
         
         
-    def track_update_keyframe_window(self, cur_frame_idx, cur_frame_visibility_filter, occ_aware_visibility, window:list):
+    def track_update_keyframe_window(self, cur_frame_idx, cur_frame_visibility_filter, window:list):
         near_window_num = 2 # last frame and current frame still in window
         window = [cur_frame_idx] + window
         cur_viewpoint = self.cameras[cur_frame_idx]
@@ -332,8 +333,8 @@ class SLAM:
         for i in range(near_window_num, len(window)): 
             keyframe_idx = window[i]
             # print(f"Checking visibility for {keyframe_idx}")
-            intersection = torch.logical_and(cur_frame_visibility_filter, occ_aware_visibility[keyframe_idx]).count_nonzero()
-            denom = min(cur_frame_visibility_filter.count_nonzero(), occ_aware_visibility[keyframe_idx].count_nonzero())
+            intersection = torch.logical_and(cur_frame_visibility_filter, self.occ_aware_visibility[keyframe_idx]).count_nonzero()
+            denom = min(cur_frame_visibility_filter.count_nonzero(), self.occ_aware_visibility[keyframe_idx].count_nonzero())
             point_ratio = intersection / denom
             cut_off = 0.4 if not self.track_initialized else self.cut_off
             if point_ratio <= cut_off:
@@ -601,7 +602,14 @@ class SLAM:
         map_metrics = Eval_Mapping(self.cameras, self.dataset, 
                                    self.gaussians, self.pipeline_params, self.background,
                                    self.save_dir, self.monocular, interval=1)
-        return {"track_metrics": track_metrics, "map_metrics": map_metrics}
+        # Only eval keyframes for semantic
+        keyframes = {}
+        for kf_idx in self.keyframe_indices:
+            keyframes[kf_idx] = self.cameras[kf_idx]
+        semantic_metrics = Eval_Semantic(keyframes, self.dataset, 
+                            self.gaussians, self.pipeline_params, self.background,
+                            self.save_dir, self.monocular, interval=1)
+        return {"track_metrics": track_metrics, "map_metrics": map_metrics, "semantic_metrics": semantic_metrics}
     
     def eval_keyframes(self):
         keyframes = {}
@@ -620,8 +628,10 @@ class SLAM:
         return kf_output
     
     def resume_gui(self):
-        self.gaussians.load_ply("/home/MonoGS_Semantic/checkpoints/gaussian_kf_001864.ply")
-        cnn_ckpts = torch.load("/home/MonoGS_Semantic/checkpoints/cnn_decoder_dim64.pth", weights_only=True)
+        gaussians_ckpt = sorted(glob.glob(f"{self.save_dir}/gaussian_kf_*.ply"))[-1]
+        cnn_ckpt = sorted(glob.glob(f"{self.save_dir}/decoder_*.pth"))[-1]
+        self.gaussians.load_ply(gaussians_ckpt)
+        cnn_ckpts = torch.load(cnn_ckpt, weights_only=True)
         self.gaussians.semantic_decoder = cnn_ckpts
         self.run_gui()
         cur_frame_idx = 0
@@ -646,12 +656,16 @@ class SLAM:
                                                         # kf_window=current_window_dict,
                                                          ))
             
-    def resume_run(self, gaussians_ckpt, cnn_ckpt, resume_info):
+    def resume_run(self):
+        gaussians_ckpt = sorted(glob.glob(f"{self.save_dir}/gaussian_kf_*.ply"))[-1]
+        cnn_ckpt = sorted(glob.glob(f"{self.save_dir}/decoder_*.pth"))[-1]
+        resume_info = json.load(open(sorted(glob.glob(f"{self.save_dir}/resume_info_*.json"))[-1], 'r'))
+        self.track_reset_flag = False
+        self.semantic_init()
         self.gaussians.load_ply(gaussians_ckpt)
         cnn_ckpt_dict = torch.load(cnn_ckpt, weights_only=True)
         self.cnn_decoder.load_state_dict(cnn_ckpt_dict)
         self.gaussians.semantic_decoder = cnn_ckpt_dict
-        print(self.gaussians._xyz.shape)
         
         self.keyframe_indices = resume_info["keyframe_indices"]
         self.current_window = resume_info["current_window"]
@@ -661,19 +675,17 @@ class SLAM:
         self.cameras = {}
         self.occ_aware_visibility = {}
         max_idx = self.keyframe_indices[-1]
-        for id in range(max_idx+1):
+        for id in tqdm(range(max_idx+1), desc="Resume Cameras"):
             viewpoint = Camera.init_from_dataset(self.dataset, id, self.projection_matrix)
             viewpoint.compute_grad_mask(self.config)
             self.cameras[id] = viewpoint
             cur_R = torch.tensor(frames_pose_dict[str(id)]['R'], dtype=torch.float32, device="cuda")
             cur_T = torch.tensor(frames_pose_dict[str(id)]['T'], dtype=torch.float32, device="cuda")
-            self.cameras[id].R = cur_R
-            self.cameras[id].T = cur_T
             self.cameras[id].update_RT(cur_R, cur_T)
             if id not in self.keyframe_indices:
                 self.cameras[id].clean() 
                 
-        for kf_idx in self.keyframe_indices:
+        for kf_idx in tqdm(self.keyframe_indices, desc="Resume OccAwareVisibility"):
             viewpoint = self.cameras[kf_idx]
             render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
             cur_occ_aware_visibility = (render_pkg["n_touched"] > 0).long()
@@ -683,9 +695,10 @@ class SLAM:
         
     
     def save_state(self, cur_frame_idx):
-        self.gaussians.save_ply(path=os.path.join(self.save_dir, f"gaussian_kf_{cur_frame_idx:06}.ply"))
+        text = f"{cur_frame_idx:06}"
+        self.gaussians.save_ply(path=os.path.join(self.save_dir, f"gaussian_kf_{text}.ply"))
         decoder_state_dict = self.cnn_decoder.state_dict()
-        torch.save(decoder_state_dict, os.path.join(self.save_dir, f"decoder_{cur_frame_idx:06}.pth"))
+        torch.save(decoder_state_dict, os.path.join(self.save_dir, f"decoder_{text}.pth"))
         
         pose_dict = {}
         for idx, viewpoint in self.cameras.items():
@@ -693,7 +706,7 @@ class SLAM:
             pose_dict[idx] = pose
         
         resume_info = {"current_window": self.current_window, "keyframe_indices": self.keyframe_indices, "pose_dict": pose_dict}
-        with open(os.path.join(self.save_dir, f"resume_info_{cur_frame_idx:06}.json"), 'w', encoding='utf-8') as f:
+        with open(os.path.join(self.save_dir, f"resume_info_{text}.json"), 'w', encoding='utf-8') as f:
             json.dump(resume_info, f, indent=4)
     
     def update_gaussians_decoder(self):
@@ -701,130 +714,130 @@ class SLAM:
         state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
         self.gaussians.semantic_decoder = state_dict_cpu
     
-    def run(self, resume=None):
+    
+    
+    def run(self, resume=False, eval=False):
         cur_frame_idx = 0
-        resume_flag = True
+        resume_init_flag = True
         self.run_gui()
-        while True:
-            if cur_frame_idx > len(self.dataset) - 1:
-                self.eval()
-                break
-            elif len(self.keyframe_indices) % self.save_trj_kf_intv == 0 \
-                    and len(self.keyframe_indices) and self.keyframe_indices[-1] == cur_frame_idx-1:
-                self.save_state(cur_frame_idx)
-                # self.gaussians.save_ply(path=os.path.join(self.save_dir, f"kf_{cur_frame_idx}.ply"))
-                # decoder_state_dict = self.cnn_decoder.state_dict()
-                # torch.save(decoder_state_dict, os.path.join(self.save_dir, f"decoder_{cur_frame_idx}.pth"))
-                output = self.eval_keyframes()
-                print(output) 
-                
-            if resume and resume_flag:
-                gaussians_ckpt = sorted(glob.glob(f"{resume}/gaussian_kf_*.ply"))[-1]
-                cnn_ckpt = sorted(glob.glob(f"{resume}/decoder_*.pth"))[-1]
-                resume_info = json.load(open(sorted(glob.glob(f"{resume}/resume_info_*.json"))[-1], 'r'))
-                self.track_reset_flag = False
-                self.semantic_init()
-                cur_frame_idx = self.resume_run(gaussians_ckpt, cnn_ckpt, resume_info)
-                resume_flag = False
-                
-            # get the current frame
-            viewpoint = Camera.init_from_dataset(self.dataset, cur_frame_idx, self.projection_matrix)
-            viewpoint.compute_grad_mask(self.config)
-            self.cameras[cur_frame_idx] = viewpoint
-            
-            # reset the track and map
-            if self.track_reset_flag:
-                print("reset")
-                self.semantic_init()
-                depth_map = self.track_reset(cur_frame_idx, viewpoint)
-                self.map_rest()
-                self.map_add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map, init=True)
-                self.map_init(cur_frame_idx, viewpoint)
-                self.update_gaussians_decoder()
-                cur_frame_idx += 1
-                continue
-            
-            # If window full, track is initialized.
-            self.track_initialized = self.track_initialized or len(self.current_window) >= self.window_size
-            
-            # tracking
-            track_start_time = time.time()
-            render_pkg = self.tracking(cur_frame_idx, viewpoint)
-            # ate_output = Eval_frame_pose(viewpoint, monocular=self.monocular)
-            print(f"[{cur_frame_idx}] track time: {time.time()-track_start_time}")
-            
-            current_window_dict = {}
-            current_window_dict[self.current_window[0]] = self.current_window[1:]
-            keyframes = [Camera.copy_camera(self.cameras[kf_idx]) for kf_idx in self.current_window]
-
+        if eval:
+            self.resume_run()
+            keyframes = [Camera.copy_camera(self.cameras[kf_idx]) for kf_idx in self.keyframe_indices]
             self.q_main2vis.put(
-                    gui_utils.GaussianPacket(
-                        gaussians=clone_obj(self.gaussians),
-                        gtcolor=viewpoint.original_image,
-                        gtdepth=viewpoint.depth
-                        if not self.monocular
-                        else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-                        current_frame=viewpoint,
-                        keyframes=keyframes,
-                        kf_window=current_window_dict,
+                        gui_utils.GaussianPacket(
+                            gaussians=clone_obj(self.gaussians),
+                            keyframes=keyframes,
+                        )
                     )
-                )
-            
-            # check keyframe
-            last_keyframe_idx = self.current_window[0]
-            check_time = (cur_frame_idx - last_keyframe_idx) >= self.kf_interval
-            curr_visibility = (render_pkg["n_touched"] > 0).long()
-            
-            create_kf = self.track_is_keyframe(
-                    cur_frame_idx,
-                    last_keyframe_idx,
-                    curr_visibility,
-                    self.occ_aware_visibility,
-                )
-            if len(self.current_window) < self.window_size:
-                union = torch.logical_or(curr_visibility, self.occ_aware_visibility[last_keyframe_idx]).count_nonzero()
-                intersection = torch.logical_and(curr_visibility, self.occ_aware_visibility[last_keyframe_idx]).count_nonzero()
-                point_ratio = intersection / union
-                create_kf = (check_time and point_ratio < self.config["Training"]["kf_overlap"])
-            
-            if create_kf and check_time:
-                self.current_window, removed = self.track_update_keyframe_window(
-                        cur_frame_idx,
-                        curr_visibility,
-                        self.occ_aware_visibility,
-                        self.current_window,
-                    )
-                if self.monocular and not self.track_initialized and removed is not None:
-                    self.track_reset = True
-                    Log(
-                        "Keyframes lacks sufficient overlap to initialize the map, resetting."
-                    )
+            eval_metrics = self.eval()
+            print(eval_metrics)
+            while True:
+                time.sleep(1)
+        else:
+            while True:
+                if cur_frame_idx > len(self.dataset) - 1:
+                    self.keyframe_indices.append(cur_frame_idx-1)
+                    self.save_state(cur_frame_idx)
+                    self.eval()
+                    break
+                elif len(self.keyframe_indices) % self.save_trj_kf_intv == 0 \
+                        and len(self.keyframe_indices) and self.keyframe_indices[-1] == cur_frame_idx-1:
+                    self.save_state(cur_frame_idx)
+                    # self.gaussians.save_ply(path=os.path.join(self.save_dir, f"kf_{cur_frame_idx}.ply"))
+                    # decoder_state_dict = self.cnn_decoder.state_dict()
+                    # torch.save(decoder_state_dict, os.path.join(self.save_dir, f"decoder_{cur_frame_idx}.pth"))
+                    output = self.eval_keyframes()
+                    print(output) 
+                    
+                if resume and resume_init_flag:
+                    cur_frame_idx = self.resume_run()
+                    resume_init_flag = False
+                    
+                # get the current frame
+                viewpoint = Camera.init_from_dataset(self.dataset, cur_frame_idx, self.projection_matrix)
+                viewpoint.compute_grad_mask(self.config)
+                self.cameras[cur_frame_idx] = viewpoint
+                
+                # reset the track and map
+                if self.track_reset_flag:
+                    print("reset")
+                    self.semantic_init()
+                    depth_map = self.track_reset(cur_frame_idx, viewpoint)
+                    self.map_rest()
+                    self.map_add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map, init=True)
+                    self.map_init(cur_frame_idx, viewpoint)
+                    self.update_gaussians_decoder()
+                    cur_frame_idx += 1
                     continue
-                depth_map = self.track_get_keyframe_depth(cur_frame_idx, depth=render_pkg["depth"], opacity=render_pkg["opacity"])
-                # mapping
-                map_start_time = time.time()
-                print("--------------")
-                print(self.gaussians._xyz.shape)
-                self.map_add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
-                print("--------------")
-                print(self.gaussians._xyz.shape)
-                self.map_full_window(iters=self.mapping_itr_num)
-                self.map_full_window(prune=True)
-                self.update_gaussians_decoder()
-                print(f"[{cur_frame_idx}] map time: {time.time()-map_start_time} keyframes_num: {len(self.keyframe_indices)} map_window:{self.current_window}")
-            else:
-                # delete the frame
-                self.cameras[cur_frame_idx].clean() 
-                torch.cuda.empty_cache()
-            cur_frame_idx += 1 
+                
+                # If window full, track is initialized.
+                self.track_initialized = self.track_initialized or len(self.current_window) >= self.window_size
+                
+                # tracking
+                track_start_time = time.time()
+                render_pkg = self.tracking(cur_frame_idx, viewpoint)
+                # ate_output = Eval_frame_pose(viewpoint, monocular=self.monocular)
+                print(f"[{cur_frame_idx}] track time: {time.time()-track_start_time}")
+                
+                current_window_dict = {}
+                current_window_dict[self.current_window[0]] = self.current_window[1:]
+                keyframes = [Camera.copy_camera(self.cameras[kf_idx]) for kf_idx in self.current_window]
+
+                self.q_main2vis.put(
+                        gui_utils.GaussianPacket(
+                            gaussians=clone_obj(self.gaussians),
+                            gtcolor=viewpoint.original_image,
+                            gtdepth=viewpoint.depth
+                            if not self.monocular
+                            else np.zeros((viewpoint.image_height, viewpoint.image_width)),
+                            current_frame=viewpoint,
+                            keyframes=keyframes,
+                            kf_window=current_window_dict,
+                        )
+                    )
+                
+                # check keyframe
+                last_keyframe_idx = self.current_window[0]
+                check_time = (cur_frame_idx - last_keyframe_idx) >= self.kf_interval
+                curr_visibility = (render_pkg["n_touched"] > 0).long()
+                create_kf = self.track_is_keyframe(
+                        cur_frame_idx,
+                        last_keyframe_idx,
+                        curr_visibility,
+                    )
+                
+                if create_kf and check_time:
+                    self.current_window, removed = self.track_update_keyframe_window(
+                            cur_frame_idx,
+                            curr_visibility,
+                            self.current_window,
+                        )
+                    if self.monocular and not self.track_initialized and removed is not None:
+                        self.track_reset = True
+                        Log("Keyframes lacks sufficient overlap to initialize the map, resetting.")
+                        continue
+                    depth_map = self.track_get_keyframe_depth(cur_frame_idx, depth=render_pkg["depth"], opacity=render_pkg["opacity"])
+                    # mapping
+                    map_start_time = time.time()
+                    self.map_add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
+                    self.map_full_window(iters=self.mapping_itr_num)
+                    self.map_full_window(prune=True)
+                    self.update_gaussians_decoder()
+                    print(f"[{cur_frame_idx}] map time: {time.time()-map_start_time} keyframes_num: {len(self.keyframe_indices)} map_window:{self.current_window}")
+                else:
+                    # delete the frame
+                    self.cameras[cur_frame_idx].clean() 
+                    torch.cuda.empty_cache()
+                cur_frame_idx += 1 
                 
 
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
     parser.add_argument("--config", type=str)
+    parser.add_argument("--save_path", type=str, default=None)
     parser.add_argument("--eval", action="store_true")
-    parser.add_argument("--resume", type=str, default=None)
+    parser.add_argument("--resume", action="store_true")
 
     args = parser.parse_args(sys.argv[1:])
 
@@ -834,47 +847,37 @@ if __name__ == "__main__":
         config = yaml.safe_load(yml)
 
     config = load_config(args.config)
-    save_dir = None
+    save_dir = None    
 
-    # if args.eval:
-    #     Log("Running MonoGS in Evaluation Mode")
-    #     Log("Following config will be overriden")
-    #     Log("\tsave_results=True")
-    #     config["Results"]["save_results"] = True
-    #     Log("\tuse_gui=False")
-    #     config["Results"]["use_gui"] = False
-    #     Log("\teval_rendering=True")
-    #     config["Results"]["eval_rendering"] = True
-    #     Log("\tuse_wandb=True")
-    #     config["Results"]["use_wandb"] = True
-    
-    if not args.eval:
+    if args.save_path:
+        save_dir = args.save_path
+        if not os.path.exists(save_dir):
+            mkdir_p(save_dir)
+        config["Results"]["save_dir"] = save_dir
+    else:
         if config["Results"]["save_results"]:
             mkdir_p(config["Results"]["save_dir"])
             current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
             path = config["Dataset"]["dataset_path"].split("/")
-            save_dir = os.path.join(
-                config["Results"]["save_dir"], path[-3] + "_" + path[-2], current_datetime
-            )
+            save_dir = os.path.join(config["Results"]["save_dir"], path[-2] + "_" + path[-1], current_datetime)
             tmp = args.config
             tmp = tmp.split(".")[0]
             config["Results"]["save_dir"] = save_dir
             mkdir_p(save_dir)
-            with open(os.path.join(save_dir, "config.yml"), "w") as file:
-                documents = yaml.dump(config, file)
-            Log("saving results in " + save_dir)
+    with open(os.path.join(save_dir, "config.yml"), "w") as file:
+        documents = yaml.dump(config, file)
+    Log("saving results in " + save_dir)
 
     slam = SLAM(config, save_dir=save_dir)
 
     try:
-        if args.eval:
-            slam.resume_gui()
-        else:
-            slam.run(resume=args.resume)
+        slam.run(resume=args.resume, eval= args.eval)
     except KeyboardInterrupt:
         Log("KeyboardInterrupt. Exiting GUI...")
-        slam.gui_process.close()
+        slam.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
+        slam.gui_process.join()
     finally:
         Log("Exiting GUI...")
-        slam.gui_process.close()
+        slam.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
+        slam.gui_process.join()
 
