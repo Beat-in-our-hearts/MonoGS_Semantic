@@ -170,7 +170,7 @@ def Eval_Semantic(cameras:Dict[int, Camera], dataset,
     pixAcc_list = []
     mIoU_list = []
     # Load the feature upsample decoder
-    cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, LSeg_FEATURES_DIM, kernel_size=1).to("cuda")
+    cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, Distilled_Feature_DIM, kernel_size=1).to("cuda")
     state_dict_cpu = gaussians.semantic_decoder
     cnn_decoder.load_state_dict({key: value.cuda() for key, value in state_dict_cpu.items()})
     cnn_decoder.eval()
@@ -192,6 +192,8 @@ def Eval_Semantic(cameras:Dict[int, Camera], dataset,
                 render_pkg = render(frame, gaussians, pipeline_params, bg_color, flag_semantic=True)
                 feature_map = render_pkg["feature_map"]
                 upsample_feature_map = cnn_decoder(feature_map)
+                # fmap_path = f"fmap_{idx}.pt"
+                # torch.save(upsample_feature_map.cpu(), fmap_path)
                 output = feature_decoder.features_to_image(upsample_feature_map)
                 predict = output["predict"][0] + 1
                 predict_semantic_transform = transform_labels(predict, ade20k_to_replica_id)

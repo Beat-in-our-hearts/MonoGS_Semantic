@@ -255,7 +255,8 @@ class LSeg_FeatureDecoder():
     def __init__(self, debug=False):
         self.debug = debug
         args_labels_path = 'feature_encoder/lseg_encoder'
-        self.clip_pretrained, _ = clip.load("ViT-B/32", device='cuda', jit=False, download_root="/tmp/")
+        # self.clip_pretrained, _ = clip.load("ViT-B/32", device='cuda', jit=False, download_root="/tmp/")
+        self.clip_pretrained, _ = clip.load("ViT-L/14", device='cuda', jit=False, download_root="/tmp/")
         self.clip_pretrained.eval()
         self.labels = get_labels('ade20k', root_path=args_labels_path)
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07)).exp()

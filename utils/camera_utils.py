@@ -3,7 +3,7 @@ from torch import nn
 import numpy as np
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from utils.slam_utils import image_gradient, image_gradient_mask
-from utils.dataset import ReplicaDataset_V2
+from utils.dataset import ReplicaDataset_V2, PandaDataset
 from utils.common_var import SEMANTIC_FEATURES_DIM
 
 class Camera(nn.Module):
@@ -73,6 +73,9 @@ class Camera(nn.Module):
     def init_from_dataset(dataset, idx, projection_matrix):
         if isinstance(dataset, ReplicaDataset_V2):
             gt_color, gt_depth, gt_pose, semantic_dict = dataset[idx]
+        elif isinstance(dataset, PandaDataset):
+            gt_color, gt_depth, gt_pose = dataset[idx]
+            gt_pose = torch.eye(4).to(device=dataset.device)
         else:
             gt_color, gt_depth, gt_pose = dataset[idx]
         return Camera(

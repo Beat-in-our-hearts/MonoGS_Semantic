@@ -29,12 +29,50 @@ from gui.gui_utils import (
 from utils.camera_utils import Camera
 from utils.logging_utils import Log
 import clip
-
+from typing import Optional
 from utils.common_var import *
 from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureDecoder
 
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
+
+
+def apply_pca_colormap_return_proj(
+    image,
+    proj_V = None,
+    low_rank_min = None,
+    low_rank_max = None,
+    niter: int = 5,
+):
+    """Convert a multichannel image to color using PCA.
+
+    Args:
+        image: Multichannel image.
+        proj_V: Projection matrix to use. If None, use torch low rank PCA.
+
+    Returns:
+        Colored PCA image of the multichannel input image.
+    """
+    image_flat = image.reshape(-1, image.shape[-1])
+
+    # Modified from https://github.com/pfnet-research/distilled-feature-fields/blob/master/train.py
+    if proj_V is None:
+        mean = image_flat.mean(0)
+        with torch.no_grad():
+            U, S, V = torch.pca_lowrank(image_flat - mean, niter=niter)
+        proj_V = V[:, :3]
+
+    low_rank = image_flat @ proj_V
+    if low_rank_min is None:
+        low_rank_min = torch.quantile(low_rank, 0.01, dim=0)
+    if low_rank_max is None:
+        low_rank_max = torch.quantile(low_rank, 0.99, dim=0)
+
+    low_rank = (low_rank - low_rank_min) / (low_rank_max - low_rank_min)
+    low_rank = torch.clamp(low_rank, 0, 1)
+
+    colored_image = low_rank.reshape(image.shape[:-1] + (3,))
+    return colored_image, proj_V, low_rank_min, low_rank_max
 
 class SLAM_GUI:
     def __init__(self, params_gui=None):
@@ -84,9 +122,13 @@ class SLAM_GUI:
         
 
     def init_feature_decoder(self):
-        self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, LSeg_FEATURES_DIM, kernel_size=1).to(self.device)
+        self.save_clip = True
+        self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, Distilled_Feature_DIM, kernel_size=1).to(self.device)
         self.cnn_decoder.eval() # no gradient
-        self.feature_decoder = LSeg_FeatureDecoder(debug=False)
+        if MODE != "LSeg":
+            self.feature_decoder = None
+        else:
+            self.feature_decoder = LSeg_FeatureDecoder(debug=False)
         self.cnn_decoder_init = False
 
     def init_widget(self):
@@ -676,32 +718,71 @@ class SLAM_GUI:
         
         # [ADD Feature]
         elif self.semantic_chbox.checked and results["feature_map"] is not None and self.cnn_decoder_init:
-            feature_map = results["feature_map"]
-            render_shape = feature_map.shape # C H W
-            resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
-                                                size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
-                                                mode="bilinear", align_corners=True).squeeze(0))
-            labels_set = self.default_lables if self.default_lables_chbox.checked else None
-            vis_out = self.feature_decoder.features_to_image(resize_feature_map, labels_set)
-            vis_feature = vis_out["rgb_render"] 
-            vis_feature = vis_feature.resize([render_shape[2], render_shape[1]])
-            vis_feature_numpy = np.array(vis_feature)
-            opacity = results["opacity"]
-            opacity = opacity[0, :, :].detach().cpu().numpy()
-            mask = np.where(opacity >= 0.8, 1, 0).astype(np.uint8)
-            vis_feature_numpy = vis_feature_numpy * mask[..., np.newaxis]
-            rgb = (
-                (torch.clamp(results["render"], min=0, max=1.0) * 255)
-                .byte()
-                .permute(1, 2, 0)
-                .contiguous()
-                .cpu()
-                .numpy()
-            )
-            mix_alpha = self.semantic_scaling_slider.double_value
-            mix_beta = 1 - mix_alpha
-            mix_img = (mix_alpha * vis_feature_numpy + mix_beta * rgb).astype(np.uint8)
-            render_img = o3d.geometry.Image(mix_img)
+            if MODE == "LSeg":
+                feature_map = results["feature_map"]
+                render_shape = feature_map.shape # C H W
+                resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                    size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                                    mode="bilinear", align_corners=True).squeeze(0))
+                labels_set = self.default_lables if self.default_lables_chbox.checked else None
+                vis_out = self.feature_decoder.features_to_image(resize_feature_map, labels_set)
+                vis_feature = vis_out["rgb_render"] 
+                vis_feature = vis_feature.resize([render_shape[2], render_shape[1]])
+                vis_feature_numpy = np.array(vis_feature)
+                opacity = results["opacity"]
+                opacity = opacity[0, :, :].detach().cpu().numpy()
+                mask = np.where(opacity >= 0.8, 1, 0).astype(np.uint8)
+                vis_feature_numpy = vis_feature_numpy * mask[..., np.newaxis]
+                rgb = (
+                    (torch.clamp(results["render"], min=0, max=1.0) * 255)
+                    .byte()
+                    .permute(1, 2, 0)
+                    .contiguous()
+                    .cpu()
+                    .numpy()
+                )
+                mix_alpha = self.semantic_scaling_slider.double_value
+                mix_beta = 1 - mix_alpha
+                mix_img = (mix_alpha * vis_feature_numpy + mix_beta * rgb).astype(np.uint8)
+                render_img = o3d.geometry.Image(mix_img)
+            elif MODE == "CLIP":
+                feature_map = results["feature_map"]
+                render_shape = feature_map.shape
+                resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                    size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                                    mode="bilinear", align_corners=True).squeeze(0))
+                if self.save_clip:
+                    torch.save(resize_feature_map, "resize_feature_map.pt")
+                    self.save_clip = False
+                resize_feature_map = resize_feature_map.permute(1, 2, 0)
+                clip_pca = apply_pca_colormap_return_proj(resize_feature_map)[0].detach().cpu().numpy() # H W C
+                img_clip_pca = (clip_pca*255).astype(np.uint8)
+                Image.fromarray(img_clip_pca).save("clip_pca.png")
+                img_clip_pca = cv2.resize(img_clip_pca, (render_shape[2], render_shape[1]))
+                render_img = o3d.geometry.Image(img_clip_pca)
+            elif MODE == "SAM2":
+                feature_map = results["feature_map"]
+                render_shape = feature_map.shape
+                resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                    size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                                    mode="bilinear", align_corners=True).squeeze(0))
+                resize_feature_map = resize_feature_map.permute(1, 2, 0)
+                sam2_pca = apply_pca_colormap_return_proj(resize_feature_map)[0].detach().cpu().numpy() # H W C
+                img_sam2_pca = (sam2_pca*255).astype(np.uint8)
+                Image.fromarray(img_sam2_pca).save("clip_pca.png")
+                img_sam2_pca = cv2.resize(img_sam2_pca, (render_shape[2], render_shape[1]))
+                rgb = (
+                    (torch.clamp(results["render"], min=0, max=1.0) * 255)
+                    .byte()
+                    .permute(1, 2, 0)
+                    .contiguous()
+                    .cpu()
+                    .numpy()
+                )
+                mix_alpha = self.semantic_scaling_slider.double_value
+                mix_beta = 1 - mix_alpha
+                mix_img = (mix_alpha * img_sam2_pca + mix_beta * rgb).astype(np.uint8)
+                render_img = o3d.geometry.Image(mix_img)
  
         elif self.elipsoid_chbox.checked:
             if self.gaussian_cur is None:
@@ -754,6 +835,7 @@ class SLAM_GUI:
                 .numpy()
             )
             render_img = o3d.geometry.Image(rgb)
+        torch.cuda.empty_cache()
         return render_img
 
     def render_gui(self):

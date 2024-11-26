@@ -8,54 +8,47 @@ Results:
   use_wandb: False
 
 Dataset:
-  sensor_type: 'depth'
-  pcd_downsample: 128
-  pcd_downsample_init: 32
+  type: 'panda'
+  sensor_type: 'monocular'
+  pcd_downsample: 32
+  pcd_downsample_init: 16
   adaptive_pointsize: True
-  point_size: 0.05
-  type: 'replica_v2'
-  hdr_enable: True
-  
+  point_size: 0.01
   Calibration:
-    fx: 600.0
-    fy: 600.0
-    cx: 599.5
-    cy: 339.5
-    k1: 0.0
-    k2: 0.0
-    p1: 0.0
-    p2: 0.0
+    fx: 912.444287604912
+    fy: 912.8087405240486
+    cx: 640.4658787286119
+    cy: 371.1822805244952
+    k1: 0.06256289904241416
+    k2: -0.11485844709972026
+    p1: 0.0009265008101616717
+    p2: -0.0008801689546164359
     k3: 0.0
-    width: 1200
-    height: 680
-    depth_scale: 6553.5
-    distorted: False
+    width: 1280
+    height: 720
+    distorted: True
 
 
 Training:
-  semantic_enable: True
-  
-  init_itr_num: 1000
+  semantic_enable: False
+  init_itr_num: 2000
   init_gaussian_update: 100
   init_gaussian_reset: 500
   init_gaussian_th: 0.005
   init_gaussian_extent: 30
   tracking_itr_num: 200
-  mapping_itr_num: 100 # 50
+  mapping_itr_num: 150 # 50
   gaussian_update_every: 150
   gaussian_update_offset: 50
   gaussian_th: 0.7
   gaussian_extent: 1.0
   gaussian_reset: 2001
   size_threshold: 20
-  kf_interval: 4
+  kf_interval: 0
   window_size: 10
   pose_window: 5
   edge_threshold: 4
   rgb_boundary_threshold: 0.01
-
-  alpha: 0.8
-
   kf_translation: 0.04
   kf_min_translation: 0.02
   kf_overlap: 0.95

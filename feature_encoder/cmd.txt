@@ -1,0 +1,4 @@
+cd encoders/lseg_encoder
+python -u encode_images.py --backbone clip_vitl16_384 --weights /home/MonoGS_Semantic/checkpoints/demo_e200.ckpt --widehead --no-scaleinv --outdir /home/MonoGS_Semantic/datasets/replica_v2/office_0/rgb_feature_lseg --test-rgb-dir /home/MonoGS_Semantic/datasets/replica_v2/office_0/rgb_hdr --workers 0
+
+python -u encode_images.py --backbone clip_vitl16_384 --weights /home/MonoGS_Semantic/checkpoints/demo_e200.ckpt --widehead --no-scaleinv --outdir /home/MonoGS_Semantic/datasets/replica_v2/room_0/rgb_feature_lseg --test-rgb-dir /home/MonoGS_Semantic/datasets/replica_v2/room_0/rgb_hdr --workers 0

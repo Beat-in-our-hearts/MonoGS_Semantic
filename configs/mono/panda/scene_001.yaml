@@ -1,0 +1,4 @@
+inherit_from: "configs/mono/panda/base_config.yaml"
+Dataset:
+  dataset_path: "datasets/panda/scene_001"
+  single_thread: False

@@ -9,7 +9,7 @@ import trimesh
 from PIL import Image
 
 from gaussian_splatting.utils.graphics_utils import focal2fov
-
+from utils.common_var import *
 try:
     import pyrealsense2 as rs
 except Exception:
@@ -55,7 +55,12 @@ class ReplicaParser_V2:
         self.depth_paths = sorted(glob.glob(f"{self.input_folder}/depth/depth_*.png"))
         self.semantic_paths = sorted(glob.glob(f"{self.input_folder}/semantic_class/semantic_class_*.png"))
         self.vis_semantic_paths = sorted(glob.glob(f"{self.input_folder}/semantic_class/vis_sem_class_*.png"))
-        self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_lseg/rgb_*_fmap_CxHxW.pt"))
+        if MODE == "LSeg":
+            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_lseg/rgb_*_fmap_CxHxW.pt"))
+        elif MODE == "CLIP":
+            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_clip/clip_embs_*.pt"))
+        elif MODE == "SAM2":
+            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_sam2/sam2_embs_*.pt"))
         self.n_img = len(self.color_paths)
         self.load_poses(f"{self.input_folder}/traj.txt")
 
@@ -156,6 +161,18 @@ class TUMParser:
 
             self.frames.append(frame)
 
+
+class PandaParser:
+    def __init__(self, input_folder, hdr=False):
+        self.input_folder = input_folder
+        self.color_paths = sorted(glob.glob(f"{self.input_folder}/images/frame_*.jpg"))
+        if MODE == "LSeg":
+            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_lseg/rgb_*_fmap_CxHxW.pt"))
+        elif MODE == "CLIP":
+            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_clip/clip_embs_*.pt"))
+        elif MODE == "SAM2":
+            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_sam2/sam2_embs_*.pt"))
+        self.n_img = len(self.color_paths)
 
 class EuRoCParser:
     def __init__(self, input_folder, start_idx=0):
@@ -403,6 +420,81 @@ class MonocularDataset_V2(BaseDataset):
         pose = torch.from_numpy(pose).to(device=self.device)
         return image, depth, pose, semantic_dict
 
+
+class MonocularDataset_Panda(BaseDataset):
+    def __init__(self, args, path, config):
+        super().__init__(args, path, config)
+        calibration = config["Dataset"]["Calibration"]
+        # Camera prameters
+        self.fx = calibration["fx"]
+        self.fy = calibration["fy"]
+        self.cx = calibration["cx"]
+        self.cy = calibration["cy"]
+        self.width = calibration["width"]
+        self.height = calibration["height"]
+        self.fovx = focal2fov(self.fx, self.width)
+        self.fovy = focal2fov(self.fy, self.height)
+        self.K = np.array(
+            [[self.fx, 0.0, self.cx], [0.0, self.fy, self.cy], [0.0, 0.0, 1.0]]
+        )
+        # distortion parameters
+        self.disorted = calibration["distorted"]
+        self.dist_coeffs = np.array(
+            [
+                calibration["k1"],
+                calibration["k2"],
+                calibration["p1"],
+                calibration["p2"],
+                calibration["k3"],
+            ]
+        )
+        self.map1x, self.map1y = cv2.initUndistortRectifyMap(
+            self.K,
+            self.dist_coeffs,
+            np.eye(3),
+            self.K,
+            (self.width, self.height),
+            cv2.CV_32FC1,
+        )
+        # depth parameters
+        self.has_depth = True if "depth_scale" in calibration.keys() else False
+        self.depth_scale = calibration["depth_scale"] if self.has_depth else None
+
+        # Default scene scale
+        nerf_normalization_radius = 5
+        self.scene_info = {
+            "nerf_normalization": {
+                "radius": nerf_normalization_radius,
+                "translation": np.zeros(3),
+            },
+        }
+        
+    def get_pred_semantic(self, idx):
+        return self.pred_semantic_paths[idx]
+    
+    def __getitem__(self, idx):
+        color_path = self.color_paths[idx]
+
+        image = np.array(Image.open(color_path))
+        depth = None
+        pose = None
+
+        if self.disorted:
+            image = cv2.remap(image, self.map1x, self.map1y, cv2.INTER_LINEAR)
+
+        if self.has_depth:
+            depth_path = self.depth_paths[idx]
+            depth = np.array(Image.open(depth_path)) / self.depth_scale
+
+        image = (
+            torch.from_numpy(image / 255.0)
+            .clamp(0.0, 1.0)
+            .permute(2, 0, 1)
+            .to(device=self.device, dtype=self.dtype)
+        )
+
+        return image, depth, pose
+
 class StereoDataset(BaseDataset):
     def __init__(self, args, path, config):
         super().__init__(args, path, config)
@@ -528,6 +620,16 @@ class TUMDataset(MonocularDataset):
         self.depth_paths = parser.depth_paths
         self.poses = parser.poses
 
+class PandaDataset(MonocularDataset_Panda):
+    def __init__(self, args, path, config):
+        super().__init__(args, path, config)
+        dataset_path = config["Dataset"]["dataset_path"]
+        parser = PandaParser(dataset_path)
+        self.num_imgs = parser.n_img
+        self.color_paths = parser.color_paths
+        self.pred_semantic_paths = parser.pred_semantic_paths
+        self.depth_paths = None
+        self.poses = None
 
 class ReplicaDataset(MonocularDataset):
     def __init__(self, args, path, config):
@@ -671,5 +773,7 @@ def load_dataset(args, path, config):
         return EurocDataset(args, path, config)
     elif config["Dataset"]["type"] == "realsense":
         return RealsenseDataset(args, path, config)
+    elif config["Dataset"]["type"] == "panda":
+        return PandaDataset(args, path, config)
     else:
         raise ValueError("Unknown dataset type")
