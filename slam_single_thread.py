@@ -17,7 +17,6 @@ import yaml
 import json
 from munch import munchify
 
-import wandb
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.scene.gaussian_model import GaussianModel
 from gaussian_splatting.utils.system_utils import mkdir_p
@@ -34,6 +33,7 @@ from utils.multiprocessing_utils import clone_obj
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from eval.eval_metrics import Eval_Tracking, Eval_Mapping, Eval_Semantic
 from utils.common_var import *
+from utils.wandb_utils import WandbWriter
 
 class SLAM:
     def __init__(self, config, save_dir=None):
@@ -44,6 +44,10 @@ class SLAM:
         self.__setup_tracking_params()
         self.__setup_mapping_params()
         self.__setup_semantic_params()
+        self.wandb_project = None
+        self.wandb_run_name = None
+        self.wandb_resume = False
+        self.wandb_run_id = None
         
     def __setup_params(self):
         self.model_params = munchify(self.config["model_params"]) 
@@ -110,7 +114,7 @@ class SLAM:
         
         # Initialize the Gaussian Model
         self.gaussians = GaussianModel(self.model_params.sh_degree, config=self.config)
-        self.gaussians.init_lr(6.0)
+        self.gaussians.init_lr(GS_INIT_LR)
         self.gaussians.training_setup(self.opt_params)
         
         # set projection_matrixv
@@ -659,11 +663,35 @@ class SLAM:
         torch.cuda.empty_cache()
         return gaussian_split
 
+    def global_map(self):
+        for itr in range(10):
+            for cam_idx in tqdm(range(len(self.keyframe_indices)),desc="Global Mapping"):
+                viewpoint = self.cameras[self.keyframe_indices[cam_idx]]
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
+                (image, viewspace_point_tensor, visibility_filter, radii, depth, opacity, n_touched) = (
+                    render_pkg["render"],
+                    render_pkg["viewspace_points"],
+                    render_pkg["visibility_filter"],
+                    render_pkg["radii"],
+                    render_pkg["depth"],
+                    render_pkg["opacity"],
+                    render_pkg["n_touched"],
+                )
+                loss_mapping = get_loss_mapping(self.config, image, depth, viewpoint, opacity)
+                loss_mapping.backward()
+                with torch.no_grad():
+                    self.gaussians.optimizer.step()
+                    self.gaussians.optimizer.zero_grad(set_to_none=True)
+                    self.gaussians.update_learning_rate(self.map_iteration_count)
+        
+                
     def eval(self):
         track_metrics = Eval_Tracking(self.cameras, self.save_dir, self.monocular)
         map_metrics = Eval_Mapping(self.cameras, self.dataset, 
                                    self.gaussians, self.pipeline_params, self.background,
                                    self.save_dir, self.monocular, interval=1)
+        self.wandb_writer.add_scalars("results/", track_metrics, global_step=None)
+        self.wandb_writer.add_scalars("results/", map_metrics, global_step=None)
         # Only eval keyframes for semantic
         keyframes = {}
         for kf_idx in self.keyframe_indices:
@@ -778,11 +806,29 @@ class SLAM:
         state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
         self.gaussians.semantic_decoder = state_dict_cpu
 
+    def wandbwriter_init(self):
+        self.wandb_writer = WandbWriter(self.wandb_project,
+                                        self.wandb_run_name,
+                                        self.wandb_resume,
+                                        self.wandb_run_id)
+        wandb_dict = {"run_id": self.wandb_writer.run.id}
+        if not self.wandb_resume:
+            with open(os.path.join(self.save_dir, "wandb.yml"), 'w', encoding='utf-8') as f:
+                yaml.dump(wandb_dict, f, default_flow_style=False, allow_unicode=True)
+                
+    def wandbwriter_write(self, output_dict, global_step):
+        self.wandb_writer.add_scalars(descriptor="track_metrics/", values=output_dict["track_metrics"], global_step=global_step)
+        self.wandb_writer.add_scalars(descriptor="map_metrics/", values=output_dict["map_metrics"], global_step=global_step)
+        if output_dict["semantic_metrics"] is not None:
+            self.wandb_writer.add_scalars(descriptor="semantic_metrics/", values=output_dict["semantic_metrics"], global_step=global_step)
+    
+    
     
     def run(self, resume=False, eval=False):
         cur_frame_idx = 0
         resume_init_flag = True
         self.run_gui()
+        self.wandbwriter_init()
         if eval:
             self.resume_run()
             keyframes = [Camera.copy_camera(self.cameras[kf_idx]) for kf_idx in self.keyframe_indices]
@@ -799,17 +845,19 @@ class SLAM:
         else:
             while True:
                 if cur_frame_idx > len(self.dataset) - 1:
-                    self.keyframe_indices.append(cur_frame_idx-1)
+                    # self.keyframe_indices.append(cur_frame_idx-1)
                     self.save_state(cur_frame_idx)
                     self.eval()
                     break
                 elif len(self.keyframe_indices) % self.save_trj_kf_intv == 0 \
                         and len(self.keyframe_indices) and self.keyframe_indices[-1] == cur_frame_idx-1:
+                    # self.global_map()
                     self.save_state(cur_frame_idx)
                     # self.gaussians.save_ply(path=os.path.join(self.save_dir, f"kf_{cur_frame_idx}.ply"))
                     # decoder_state_dict = self.cnn_decoder.state_dict()
                     # torch.save(decoder_state_dict, os.path.join(self.save_dir, f"decoder_{cur_frame_idx}.pth"))
                     output = self.eval_keyframes()
+                    self.wandbwriter_write(output, cur_frame_idx)
                     # self.global_bundle_adjustment()
                     print(output) 
                     
@@ -862,7 +910,6 @@ class SLAM:
                 
                 # check keyframe
                 last_keyframe_idx = self.current_window[0]
-                check_time = (cur_frame_idx - last_keyframe_idx) >= self.kf_interval
                 curr_visibility = (render_pkg["n_touched"] > 0).long()
                 create_kf = self.track_is_keyframe(
                         cur_frame_idx,
@@ -870,11 +917,11 @@ class SLAM:
                         curr_visibility,
                     )
                 
-                # init for 100 frames
-                if cur_frame_idx < 100 and check_time:
-                    create_kf = True
+                # # init for 100 frames
+                # if cur_frame_idx < 100 and check_time:
+                #     create_kf = True
                 
-                if create_kf and check_time:
+                if create_kf:
                     self.current_window, removed = self.track_update_keyframe_window(
                             cur_frame_idx,
                             curr_visibility,
@@ -889,7 +936,7 @@ class SLAM:
                     map_start_time = time.time()
                     self.map_add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
                     map_itr_num = 2*self.mapping_itr_num if cur_frame_idx < 100 else self.mapping_itr_num 
-                    self.map_full_window(iters=self.mapping_itr_num)
+                    self.map_full_window(iters=map_itr_num)
                     self.map_full_window(prune=True)
                     self.update_gaussians_decoder()
                     print(f"[{cur_frame_idx}] map time: {time.time()-map_start_time} keyframes_num: {len(self.keyframe_indices)} map_window:{self.current_window}")
@@ -939,14 +986,28 @@ if __name__ == "__main__":
 
     slam = SLAM(config, save_dir=save_dir)
 
-    try:
-        slam.run(resume=args.resume, eval= args.eval)
-    except KeyboardInterrupt:
-        Log("KeyboardInterrupt. Exiting GUI...")
-        slam.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
-        slam.gui_process.join()
-    finally:
-        Log("Exiting GUI...")
-        slam.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
-        slam.gui_process.join()
+    slam.wandb_project = "GSDFF_SLAM"
+    run_name = save_dir.split("results/")[-1]
+    slam.wandb_run_name = run_name.replace("/", "_")
+    slam.wandb_resume = args.resume
+    if args.resume:
+        with open(os.path.join(save_dir, "wandb.yml"), "r") as yml:
+            config = yaml.safe_load(yml)
+        slam.wandb_run_id = config["run_id"]
 
+    # try:
+    slam.run(resume=args.resume, eval= args.eval)
+    slam.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
+    time.sleep(5)
+    slam.gui_process.close()
+    # except KeyboardInterrupt:
+    #     Log("KeyboardInterrupt. Exiting GUI...")
+    #     slam.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
+    #     slam.gui_process.join()
+    # finally:
+    #     Log("Exiting GUI...")
+    #     slam.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
+    #     slam.gui_process.join()
+
+# python slam_single_thread.py --config configs/rgbd/replica_v2/room2.yaml --save_path ./results/replica/room2/sam2_test
+# python slam_single_thread.py --config configs/rgbd/replica_v2/room2.yaml --save_path ./results/replica/room2/sam2_64

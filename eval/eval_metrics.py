@@ -113,8 +113,10 @@ def Eval_Mapping(cameras:Dict[int, Camera], dataset,
             gt_color, gt_depth, gt_pose, semantic_dict = dataset[idx]
         else:
             gt_color, gt_depth, _ = dataset[idx]
-        mask = gt_color > 0
-        depth_mask = gt_color.sum(dim=0).unsqueeze(0) > 0
+        
+        gt_shape = gt_color.shape
+        mask = gt_color > 0.01
+
         
         with torch.no_grad():
             render_pkg = render(frame, gaussians, pipeline_params, bg_color)
@@ -124,15 +126,24 @@ def Eval_Mapping(cameras:Dict[int, Camera], dataset,
             render_depth = render_pkg["depth"]
             gt_depth = torch.tensor(gt_depth, device=render_depth.device).unsqueeze(0)
             
-            psnr_score = psnr((render_color[mask]).unsqueeze(0), (gt_color[mask]).unsqueeze(0))
-            ssim_score = ssim((render_color).unsqueeze(0), (gt_color).unsqueeze(0))
-            lpips_score = cal_lpips((render_color).unsqueeze(0), (gt_color).unsqueeze(0))
+            render_color_with_mask = torch.zeros_like(render_color)
+            gt_color_with_mask = torch.zeros_like(gt_color)
+
+            render_color_with_mask[mask] = render_color[mask]
+            gt_color_with_mask[mask] = gt_color[mask]
+
+            psnr_score = psnr((render_color_with_mask).unsqueeze(0), (gt_color_with_mask).unsqueeze(0))
+            ssim_score = ssim((render_color_with_mask).unsqueeze(0), (gt_color_with_mask).unsqueeze(0))
+            lpips_score = cal_lpips((render_color_with_mask).unsqueeze(0), (gt_color_with_mask).unsqueeze(0))
             
             PSNR.append(psnr_score.item())
             SSIM.append(ssim_score.item())
             LPIPS.append(lpips_score.item())
             
             # Reconstruction Metrics
+            depth_pixel_mask = (gt_depth > 0.01).view(*gt_depth.shape)
+            opacity_mask = (render_pkg["opacity"] > 0.95).view(*gt_depth.shape)
+            depth_mask = depth_pixel_mask * opacity_mask
             depth_l1 = l1_loss(render_depth[depth_mask], gt_depth[depth_mask])
             
             DEPTH_L1.append(depth_l1.item())
@@ -143,6 +154,12 @@ def Eval_Mapping(cameras:Dict[int, Camera], dataset,
     mean_lpips = np.mean(LPIPS)
     mean_depth_l1 = np.mean(DEPTH_L1)
     output = {"mean_psnr": mean_psnr, "mean_ssim": mean_ssim, "mean_lpips": mean_lpips, "mean_depth_l1": mean_depth_l1}
+    
+    with open("map.log", "a+") as f:
+        f.write(f"Mean PSNR: {PSNR}\n")
+        f.write(f"Mean SSIM: {SSIM}\n")
+        f.write(f"Mean LPIPS: {LPIPS}\n")
+        f.write(f"Mean Depth L1: {DEPTH_L1}\n\n")
     
     if save_dir is not None:
         # Write the results to a json file
