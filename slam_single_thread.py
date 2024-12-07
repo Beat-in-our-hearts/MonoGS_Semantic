@@ -16,6 +16,7 @@ from tqdm import tqdm
 import yaml
 import json
 from munch import munchify
+import cv2
 
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.scene.gaussian_model import GaussianModel
@@ -811,18 +812,36 @@ class SLAM:
                                         self.wandb_run_name,
                                         self.wandb_resume,
                                         self.wandb_run_id)
-        wandb_dict = {"run_id": self.wandb_writer.run.id}
-        if not self.wandb_resume:
-            with open(os.path.join(self.save_dir, "wandb.yml"), 'w', encoding='utf-8') as f:
-                yaml.dump(wandb_dict, f, default_flow_style=False, allow_unicode=True)
-                
+        if self.wandb_writer.use_wandb:
+            wandb_dict = {"run_id": self.wandb_writer.run.id}
+            if not self.wandb_resume:
+                with open(os.path.join(self.save_dir, "wandb.yml"), 'w', encoding='utf-8') as f:
+                    yaml.dump(wandb_dict, f, default_flow_style=False, allow_unicode=True)
+                    
     def wandbwriter_write(self, output_dict, global_step):
         self.wandb_writer.add_scalars(descriptor="track_metrics/", values=output_dict["track_metrics"], global_step=global_step)
         self.wandb_writer.add_scalars(descriptor="map_metrics/", values=output_dict["map_metrics"], global_step=global_step)
         if output_dict["semantic_metrics"] is not None:
             self.wandb_writer.add_scalars(descriptor="semantic_metrics/", values=output_dict["semantic_metrics"], global_step=global_step)
     
-    
+    def save_render(self, render_pkg, cur_frame_idx):
+        render_rgb = render_pkg["render"]
+        render_depth = render_pkg["depth"][0]
+        
+        render_save_path = os.path.join(self.save_dir, "render")
+        if not os.path.exists(render_save_path):
+            os.mkdir(render_save_path)
+        
+        # cv2 save image 
+        render_rgb = render_rgb.permute(1, 2, 0).cpu().detach().numpy()
+        render_rgb = render_rgb[..., ::-1]
+        render_rgb = (render_rgb * 255).astype(np.uint8)
+        render_rgb_path = os.path.join(render_save_path, f"render_rgb_{cur_frame_idx:06}.png")
+        cv2.imwrite(render_rgb_path, render_rgb)
+        
+        render_depth = (render_depth * SAVE_DEPTH_SCALE).cpu().detach().numpy().astype(np.uint16)
+        render_depth_path = os.path.join(render_save_path, f"render_depth_{cur_frame_idx:06}.png")
+        cv2.imwrite(render_depth_path, render_depth)
     
     def run(self, resume=False, eval=False):
         cur_frame_idx = 0
@@ -891,6 +910,8 @@ class SLAM:
                 # ate_output = Eval_frame_pose(viewpoint, monocular=self.monocular)
                 print(f"[{cur_frame_idx}] track time: {time.time()-track_start_time}")
                 
+                self.save_render(render_pkg, cur_frame_idx)
+
                 current_window_dict = {}
                 current_window_dict[self.current_window[0]] = self.current_window[1:]
                 keyframes = [Camera.copy_camera(self.cameras[kf_idx]) for kf_idx in self.current_window]

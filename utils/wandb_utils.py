@@ -3,7 +3,7 @@ import wandb
 from typing import Any
 import numpy as np
 import torch
-
+from utils.common_var import WANDB_ENABLED
 
 class WandbWriter:
     def __init__(self, project=None, run_name=None, resume=False, run_id =None):
@@ -15,7 +15,7 @@ class WandbWriter:
         """
         
         self.use_wandb = False
-        if project != None:
+        if project != None and WANDB_ENABLED:
             self.use_wandb = True
             
         if self.use_wandb: 
@@ -68,7 +68,7 @@ class WandbWriter:
 
     def add_scalar(self, descriptor: str, value: Any, global_step: int):
         if self.use_wandb:
-            wandb.log({descriptor: value}, step=int(global_step))
+            wandb.log({descriptor: value}, step=global_step)
 
     def add_scalars(self, descriptor: str, values: dict, global_step: int):
         for k in values:
