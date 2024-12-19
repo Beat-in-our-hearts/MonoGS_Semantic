@@ -116,7 +116,10 @@ def render(
     else:
         colors_precomp = override_color
 
-    semantic_feature = pc.get_semantic_feature # [ADD Feat]
+    if flag_semantic:
+        semantic_feature = pc.get_semantic_feature # [ADD Feat]
+    else:
+        semantic_feature = torch.zeros((1,), dtype=opacity.dtype, device=opacity.device)
     # Rasterize visible Gaussians to image, obtain their radii (on screen).
     if mask is not None:
         raise NotImplementedError("Masking is not implemented yet.")

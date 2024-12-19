@@ -14,7 +14,7 @@ Dataset:
   adaptive_pointsize: True
   point_size: 0.05
   type: 'replica_v2'
-  hdr_enable: True
+  hdr_enable: False
   
   Calibration:
     fx: 600.0
