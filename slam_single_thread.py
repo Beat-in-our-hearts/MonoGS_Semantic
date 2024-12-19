@@ -869,7 +869,6 @@ class SLAM:
                 
                 # reset the track and map
                 if self.track_reset_flag:
-                    print("reset")
                     self.semantic_init()
                     depth_map = self.track_reset(cur_frame_idx, viewpoint)
                     self.map_rest()
