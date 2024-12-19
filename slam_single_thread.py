@@ -825,7 +825,6 @@ class SLAM:
             self.wandb_writer.add_scalars(descriptor="semantic_metrics/", values=output_dict["semantic_metrics"], global_step=global_step)
     
     def save_render(self, render_pkg, cur_frame_idx):
-        render_rgb = render_pkg["render"]
         render_depth = render_pkg["depth"][0]
         
         render_save_path = os.path.join(self.save_dir, "render")
@@ -833,9 +832,27 @@ class SLAM:
             os.mkdir(render_save_path)
         
         # cv2 save image 
-        render_rgb = render_rgb.permute(1, 2, 0).cpu().detach().numpy()
+        render_rgb = (
+                (torch.clamp(render_pkg["render"], min=0, max=1.0) * 255)
+                .byte()
+                .permute(1, 2, 0)
+                .contiguous()
+                .cpu()
+                .numpy()
+            )
         render_rgb = render_rgb[..., ::-1]
-        render_rgb = (render_rgb * 255).astype(np.uint8)
+        
+        # render_depth = render_pkg["depth"]
+        #     depth = depth[0, :, :].detach().cpu().numpy()
+        #     max_depth = np.max(depth)
+        #     depth = imgviz.depth2rgb(
+        #         depth, min_value=0.1, max_value=max_depth, colormap="jet"
+        #     )
+        #     depth = torch.from_numpy(depth)
+        #     depth = torch.permute(depth, (2, 0, 1)).float()
+        #     depth = (depth).byte().permute(1, 2, 0).contiguous().cpu().numpy()
+        #     render_img = o3d.geometry.Image(depth)
+        # render_img = o3d.geometry.Image(rgb)
         render_rgb_path = os.path.join(render_save_path, f"render_rgb_{cur_frame_idx:06}.png")
         cv2.imwrite(render_rgb_path, render_rgb)
         
@@ -1019,6 +1036,7 @@ if __name__ == "__main__":
     # try:
     slam.run(resume=args.resume, eval= args.eval)
     slam.q_main2vis.put(gui_utils.GaussianPacket(finish=True))
+    slam.gui_process.join()
     time.sleep(5)
     slam.gui_process.close()
     # except KeyboardInterrupt:
@@ -1032,3 +1050,4 @@ if __name__ == "__main__":
 
 # python slam_single_thread.py --config configs/rgbd/replica_v2/room2.yaml --save_path ./results/replica/room2/sam2_test
 # python slam_single_thread.py --config configs/rgbd/replica_v2/room2.yaml --save_path ./results/replica/room2/sam2_64
+# python slam_single_thread.py --config configs/rgbd/replica_v2/office2.yaml --save_path ./results/replica/office2/gui_test

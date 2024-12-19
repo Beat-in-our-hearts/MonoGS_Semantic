@@ -21,3 +21,4 @@ result*
 checkpoints
 vis
 test
+*.log
