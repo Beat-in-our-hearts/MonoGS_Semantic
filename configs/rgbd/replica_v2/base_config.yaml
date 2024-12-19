@@ -2,8 +2,8 @@ Results:
   save_results: True
   save_dir: "results"
   save_trj: True
-  save_trj_kf_intv: 10
-  use_gui: True
+  save_trj_kf_intv: 5
+  use_gui: False
   eval_rendering: False
   use_wandb: False
 
@@ -14,7 +14,7 @@ Dataset:
   adaptive_pointsize: True
   point_size: 0.05
   type: 'replica_v2'
-  hdr_enable: True
+  hdr_enable: False
   
   Calibration:
     fx: 600.0
@@ -58,7 +58,7 @@ Training:
 
   kf_translation: 0.04
   kf_min_translation: 0.01 # 0.02
-  kf_overlap: 0.75
+  kf_overlap: 0.9
   prune_mode: 'slam'
   single_thread: True
   spherical_harmonics: False

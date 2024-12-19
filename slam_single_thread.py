@@ -36,6 +36,7 @@ from eval.eval_metrics import Eval_Tracking, Eval_Mapping, Eval_Semantic
 from utils.common_var import *
 from utils.wandb_utils import WandbWriter
 
+from utils.multiprocessing_utils import FakeQueue
 class SLAM:
     def __init__(self, config, save_dir=None):
         self.config = config
@@ -180,6 +181,9 @@ class SLAM:
             self.gui_process = mp.Process(target=slam_gui.run, args=(self.params_gui,))
             self.gui_process.start()
             time.sleep(5)
+        else:
+            self.q_main2vis = FakeQueue()
+            self.q_vis2main = FakeQueue()
 
     def track_update_optimizer(self, viewpoint:Camera = None, BA_flag = False, GBA_flag = False) -> Optimizer:
         """
