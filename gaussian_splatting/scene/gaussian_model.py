@@ -31,6 +31,7 @@ from gaussian_splatting.utils.graphics_utils import BasicPointCloud, getWorld2Vi
 from gaussian_splatting.utils.sh_utils import RGB2SH
 from gaussian_splatting.utils.system_utils import mkdir_p
 
+from diff_gaussian_rasterization import get_semantic_channels
 
 class GaussianModel:
     def __init__(self, sh_degree: int, config=None):
@@ -45,7 +46,10 @@ class GaussianModel:
         self._opacity = torch.empty(0, device="cuda")
         self.max_radii2D = torch.empty(0, device="cuda")
         self.xyz_gradient_accum = torch.empty(0, device="cuda")
-        self._semantic_feature = torch.empty(0, device="cuda") # ADD Feat
+        
+        # [ADD Feat]
+        self._semantic_feature = torch.empty(0, device="cuda") 
+        self.semantic_feature_dim  = get_semantic_channels()
 
         self.unique_kfIDs = torch.empty(0).int()
         self.n_obs = torch.empty(0).int()
@@ -67,7 +71,6 @@ class GaussianModel:
 
         self.isotropic = False
         
-        self.semantic_decoder = None # store the parameters of the semantic decoder [ADD Feat]
 
     def build_covariance_from_scaling_rotation(
         self, scaling, scaling_modifier, rotation
@@ -188,11 +191,12 @@ class GaussianModel:
         features[:, :3, 0] = fused_color
         features[:, 3:, 1:] = 0.0
         
-        if cam.semantic_feature_dim is not None:
-            self._semantic_feature = torch.zeros(fused_point_cloud.shape[0], cam.semantic_feature_dim, 1).float().cuda() # [ADD Feat]
+        # [ADD Feat]
+        if self.semantic_feature_dim is not None:
+            self._semantic_feature = torch.zeros(fused_point_cloud.shape[0], self.semantic_feature_dim, 1).float().cuda() 
         else:
-            self._semantic_feature = torch.empty(0, device="cuda") # [ADD Feat]
-        
+            self._semantic_feature = torch.empty(0, device="cuda") 
+            
         dist2 = (
             torch.clamp_min(
                 distCUDA2(torch.from_numpy(np.asarray(pcd.points)).float().cuda()),

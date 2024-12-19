@@ -33,46 +33,12 @@ from typing import Optional
 from utils.common_var import *
 from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureDecoder
 
+from utils.semantic_setting import Semantic_Config
+from utils.semantic_utils import apply_pca_colormap
+from diff_gaussian_rasterization import get_semantic_channels
+
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
-
-
-def apply_pca_colormap_return_proj(
-    image,
-    proj_V = None,
-    low_rank_min = None,
-    low_rank_max = None,
-    niter: int = 5,
-):
-    """Convert a multichannel image to color using PCA.
-
-    Args:
-        image: Multichannel image.
-        proj_V: Projection matrix to use. If None, use torch low rank PCA.
-
-    Returns:
-        Colored PCA image of the multichannel input image.
-    """
-    image_flat = image.reshape(-1, image.shape[-1])
-
-    # Modified from https://github.com/pfnet-research/distilled-feature-fields/blob/master/train.py
-    if proj_V is None:
-        mean = image_flat.mean(0)
-        with torch.no_grad():
-            U, S, V = torch.pca_lowrank(image_flat - mean, niter=niter)
-        proj_V = V[:, :3]
-
-    low_rank = image_flat @ proj_V
-    if low_rank_min is None:
-        low_rank_min = torch.quantile(low_rank, 0.01, dim=0)
-    if low_rank_max is None:
-        low_rank_max = torch.quantile(low_rank, 0.99, dim=0)
-
-    low_rank = (low_rank - low_rank_min) / (low_rank_max - low_rank_min)
-    low_rank = torch.clamp(low_rank, 0, 1)
-
-    colored_image = low_rank.reshape(image.shape[:-1] + (3,))
-    return colored_image, proj_V, low_rank_min, low_rank_max
 
 class SLAM_GUI:
     def __init__(self, params_gui=None):
@@ -122,14 +88,20 @@ class SLAM_GUI:
         
 
     def init_feature_decoder(self):
-        self.save_clip = True
-        self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, Distilled_Feature_DIM, kernel_size=1).to(self.device)
-        self.cnn_decoder.eval() # no gradient
-        if MODE != "LSeg":
-            self.feature_decoder = None
-        else:
-            self.feature_decoder = LSeg_FeatureDecoder(debug=False)
+        if Semantic_Config.enable:
+            self.pred_feature_dim = Semantic_Config.semantic_dim[Semantic_Config.mode]
+            self.semantic_feature_dim = get_semantic_channels()
+            self.cnn_decoder = nn.Conv2d(self.semantic_feature_dim, self.pred_feature_dim, kernel_size=1).to(self.device)
+            self.cnn_decoder.eval()
         self.cnn_decoder_init = False
+        # self.save_clip = True
+        # self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, Distilled_Feature_DIM, kernel_size=1).to(self.device)
+        # self.cnn_decoder.eval() # no gradient
+        # if MODE != "LSeg":
+        #     self.feature_decoder = None
+        # else:
+        #     self.feature_decoder = LSeg_FeatureDecoder(debug=False)
+        # self.cnn_decoder_init = False
 
     def init_widget(self):
         self.window_w, self.window_h = 1600, 800
@@ -495,15 +467,17 @@ class SLAM_GUI:
         if gaussian_packet.has_gaussians:
             del self.gaussian_cur
             self.gaussian_cur = gaussian_packet
-            if self.gaussian_cur.semantic_decoder is not None:
-                state_dict_cpu = self.gaussian_cur.semantic_decoder
-                self.cnn_decoder.load_state_dict({key: value.cuda() for key, value in state_dict_cpu.items()})
-                self.cnn_decoder_init = True
             self.output_info.text = "Number of Gaussians: {}".format(
                 self.gaussian_cur.get_xyz.shape[0]
             )
             self.init = True
-
+            
+        # [ADD Feature]
+        if gaussian_packet.semantic_decoder is not None:
+            state_dict_cpu = gaussian_packet.semantic_decoder
+            self.cnn_decoder.load_state_dict({key: value.cuda() for key, value in state_dict_cpu.items()})
+            self.cnn_decoder_init = True
+            
         if gaussian_packet.current_frame is not None:
             frustum = self.add_camera(
                 gaussian_packet.current_frame, name="current", color=[0, 1, 0]
@@ -764,12 +738,11 @@ class SLAM_GUI:
                 feature_map = results["feature_map"]
                 render_shape = feature_map.shape
                 resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
-                                                    size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                                    size= Semantic_Config.render_size,
                                                     mode="bilinear", align_corners=True).squeeze(0))
-                resize_feature_map = resize_feature_map.permute(1, 2, 0)
-                sam2_pca = apply_pca_colormap_return_proj(resize_feature_map)[0].detach().cpu().numpy() # H W C
+                
+                sam2_pca = apply_pca_colormap(resize_feature_map.permute(1, 2, 0)).detach().cpu().numpy() # H W C
                 img_sam2_pca = (sam2_pca*255).astype(np.uint8)
-                # Image.fromarray(img_sam2_pca).save("clip_pca.png")
                 img_sam2_pca = cv2.resize(img_sam2_pca, (render_shape[2], render_shape[1]))
                 rgb = (
                     (torch.clamp(results["render"], min=0, max=1.0) * 255)
@@ -835,6 +808,10 @@ class SLAM_GUI:
                 .numpy()
             )
             render_img = o3d.geometry.Image(rgb)
+            
+        for key, value in results.items():
+            del value
+            
         torch.cuda.empty_cache()
         return render_img
 

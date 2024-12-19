@@ -26,7 +26,7 @@ from gaussian_splatting.utils.loss_utils import ssim, l1_loss
 from gaussian_splatting.utils.system_utils import mkdir_p
 from utils.logging_utils import Log
 from utils.camera_utils import Camera
-from utils.dataset import ReplicaDataset_V2
+
 from utils.common_var import *
 from eval.segmentationMetric import SegmentationMetric
 from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureDecoder
@@ -39,15 +39,6 @@ def gen_pose_matrix(R, T):
 
 parent_directory = os.path.dirname(os.path.abspath(__file__))
 labels_path = os.path.join(parent_directory, 'labels/replica_ade20k_match_dict.json')
-# def Eval_frame_pose(frame:Camera, monocular=False):
-#     traj_est = [np.linalg.inv(gen_pose_matrix(frame.R, frame.T))]
-#     traj_gt  = [np.linalg.inv(gen_pose_matrix(frame.R_gt, frame.T_gt))]
-    
-#     pose_gt = PosePath3D(poses_se3=traj_gt)
-#     pose_est = PosePath3D(poses_se3=traj_est)
-    
-#     output = {'pose_gt': pose_gt, 'pose_est': pose_est}
-#     return output
 
 def Eval_Tracking(cameras:Dict[int, Camera], save_dir=None, monocular=False):
     traj_est: List[np.ndarray] = []
@@ -109,10 +100,8 @@ def Eval_Mapping(cameras:Dict[int, Camera], dataset,
     cal_lpips = LearnedPerceptualImagePatchSimilarity(net_type="alex", normalize=True).to("cuda")
     
     for idx, frame in tqdm(cameras.items(), desc="Evaluating Mapping"):
-        if isinstance(dataset, ReplicaDataset_V2):
-            gt_color, gt_depth, gt_pose, semantic_dict = dataset[idx]
-        else:
-            gt_color, gt_depth, _ = dataset[idx]
+
+        gt_color, gt_depth, _ = dataset[idx]
         
         gt_shape = gt_color.shape
         mask = gt_color > 0.01
@@ -181,8 +170,9 @@ def transform_labels(labels, id_dict):
         reslut[labels == key] = value
     return reslut
 
+# TODO
 def Eval_Semantic(cameras:Dict[int, Camera], dataset, 
-                    gaussians, pipeline_params, bg_color,
+                    gaussians, pipeline_params, bg_color, 
                     save_dir=None, monocular=False, interval=5):
     pixAcc_list = []
     mIoU_list = []

@@ -15,12 +15,13 @@ try:
 except Exception:
     pass
 
+from utils.semantic_setting import Semantic_Config
 
 class ReplicaParser:
     def __init__(self, input_folder):
         self.input_folder = input_folder
-        self.color_paths = sorted(glob.glob(f"{self.input_folder}/results/frame*.jpg"))
-        self.depth_paths = sorted(glob.glob(f"{self.input_folder}/results/depth*.png"))
+        self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb/rgb*.png"))
+        self.depth_paths = sorted(glob.glob(f"{self.input_folder}/depth/depth*.png"))
         self.n_img = len(self.color_paths)
         self.load_poses(f"{self.input_folder}/traj.txt")
 
@@ -44,45 +45,6 @@ class ReplicaParser:
             frames.append(frame)
         self.frames = frames
         
-        
-class ReplicaParser_V2:
-    def __init__(self, input_folder, hdr=False):
-        self.input_folder = input_folder
-        if hdr:
-            self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb_hdr/rgb_*.png"))
-        else:
-            self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb/rgb_*.png"))
-        self.depth_paths = sorted(glob.glob(f"{self.input_folder}/depth/depth_*.png"))
-        self.semantic_paths = sorted(glob.glob(f"{self.input_folder}/semantic_class/semantic_class_*.png"))
-        self.vis_semantic_paths = sorted(glob.glob(f"{self.input_folder}/semantic_class/vis_sem_class_*.png"))
-        if MODE == "LSeg":
-            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_lseg/rgb_*_fmap_CxHxW.pt"))
-        elif MODE == "CLIP":
-            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_clip/clip_embs_*.pt"))
-        elif MODE == "SAM2":
-            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_sam2/sam2_embs_*.pt"))
-        self.n_img = len(self.color_paths)
-        self.load_poses(f"{self.input_folder}/traj.txt")
-
-    def load_poses(self, path):
-        self.poses = []
-        with open(path, "r") as f:
-            lines = f.readlines()
-
-        frames = []
-        for i in range(self.n_img):
-            line = lines[i]
-            pose = np.array(list(map(float, line.split()))).reshape(4, 4)
-            pose = np.linalg.inv(pose)
-            self.poses.append(pose)
-            frame = {
-                "file_path": self.color_paths[i],
-                "depth_path": self.depth_paths[i],
-                "transform_matrix": pose.tolist(),
-            }
-
-            frames.append(frame)
-        self.frames = frames
         
 
 class TUMParser:
@@ -328,172 +290,6 @@ class MonocularDataset(BaseDataset):
         )
         pose = torch.from_numpy(pose).to(device=self.device)
         return image, depth, pose
-    
-class MonocularDataset_V2(BaseDataset):
-    def __init__(self, args, path, config):
-        super().__init__(args, path, config)
-        calibration = config["Dataset"]["Calibration"]
-        # Camera prameters
-        self.fx = calibration["fx"]
-        self.fy = calibration["fy"]
-        self.cx = calibration["cx"]
-        self.cy = calibration["cy"]
-        self.width = calibration["width"]
-        self.height = calibration["height"]
-        self.fovx = focal2fov(self.fx, self.width)
-        self.fovy = focal2fov(self.fy, self.height)
-        self.K = np.array(
-            [[self.fx, 0.0, self.cx], [0.0, self.fy, self.cy], [0.0, 0.0, 1.0]]
-        )
-        # distortion parameters
-        self.disorted = calibration["distorted"]
-        self.dist_coeffs = np.array(
-            [
-                calibration["k1"],
-                calibration["k2"],
-                calibration["p1"],
-                calibration["p2"],
-                calibration["k3"],
-            ]
-        )
-        self.map1x, self.map1y = cv2.initUndistortRectifyMap(
-            self.K,
-            self.dist_coeffs,
-            np.eye(3),
-            self.K,
-            (self.width, self.height),
-            cv2.CV_32FC1,
-        )
-        # depth parameters
-        self.has_depth = True if "depth_scale" in calibration.keys() else False
-        self.depth_scale = calibration["depth_scale"] if self.has_depth else None
-
-        # semantic parameters
-        self.has_semantic = True if hasattr(self, "semantic_paths") else False
-        # Default scene scale
-        nerf_normalization_radius = 5
-        self.scene_info = {
-            "nerf_normalization": {
-                "radius": nerf_normalization_radius,
-                "translation": np.zeros(3),
-            },
-        }
-        
-    def get_pred_semantic(self, idx):
-        return self.pred_semantic_paths[idx]
-    
-    def get_gt_semantic_path(self, idx):
-        return self.semantic_paths[idx]
-    
-
-    def __getitem__(self, idx):
-        color_path = self.color_paths[idx]
-        pose = self.poses[idx]
-
-        image = np.array(Image.open(color_path)) # PIL open slower than cv2
-        depth = None
-        semantic_dict = {}
-
-        if self.disorted:
-            image = cv2.remap(image, self.map1x, self.map1y, cv2.INTER_LINEAR)
-
-        if self.has_depth:
-            depth_path = self.depth_paths[idx]
-            depth = np.array(Image.open(depth_path)) / self.depth_scale
-
-        if self.has_semantic:
-            semantic_path = self.semantic_paths[idx]
-            vis_semantic_path = self.vis_semantic_paths[idx]
-            semantic = np.array(Image.open(semantic_path))
-            vis_semantic = np.array(Image.open(vis_semantic_path))
-            semantic = torch.from_numpy(semantic).to(device=self.device, dtype=self.dtype)
-            vis_semantic = torch.from_numpy(vis_semantic).to(device=self.device, dtype=self.dtype)
-            semantic_dict = {"semantic": semantic, 
-                             "vis_semantic": vis_semantic,
-                            "pred_semantic": self.pred_semantic_paths[idx]}
-        image = (
-            torch.from_numpy(image / 255.0)
-            .clamp(0.0, 1.0)
-            .permute(2, 0, 1)
-            .to(device=self.device, dtype=self.dtype)
-        )
-        pose = torch.from_numpy(pose).to(device=self.device)
-        return image, depth, pose, semantic_dict
-
-
-class MonocularDataset_Panda(BaseDataset):
-    def __init__(self, args, path, config):
-        super().__init__(args, path, config)
-        calibration = config["Dataset"]["Calibration"]
-        # Camera prameters
-        self.fx = calibration["fx"]
-        self.fy = calibration["fy"]
-        self.cx = calibration["cx"]
-        self.cy = calibration["cy"]
-        self.width = calibration["width"]
-        self.height = calibration["height"]
-        self.fovx = focal2fov(self.fx, self.width)
-        self.fovy = focal2fov(self.fy, self.height)
-        self.K = np.array(
-            [[self.fx, 0.0, self.cx], [0.0, self.fy, self.cy], [0.0, 0.0, 1.0]]
-        )
-        # distortion parameters
-        self.disorted = calibration["distorted"]
-        self.dist_coeffs = np.array(
-            [
-                calibration["k1"],
-                calibration["k2"],
-                calibration["p1"],
-                calibration["p2"],
-                calibration["k3"],
-            ]
-        )
-        self.map1x, self.map1y = cv2.initUndistortRectifyMap(
-            self.K,
-            self.dist_coeffs,
-            np.eye(3),
-            self.K,
-            (self.width, self.height),
-            cv2.CV_32FC1,
-        )
-        # depth parameters
-        self.has_depth = True if "depth_scale" in calibration.keys() else False
-        self.depth_scale = calibration["depth_scale"] if self.has_depth else None
-
-        # Default scene scale
-        nerf_normalization_radius = 5
-        self.scene_info = {
-            "nerf_normalization": {
-                "radius": nerf_normalization_radius,
-                "translation": np.zeros(3),
-            },
-        }
-        
-    def get_pred_semantic(self, idx):
-        return self.pred_semantic_paths[idx]
-    
-    def __getitem__(self, idx):
-        color_path = self.color_paths[idx]
-
-        image = np.array(Image.open(color_path))
-        depth = None
-        pose = None
-
-        if self.disorted:
-            image = cv2.remap(image, self.map1x, self.map1y, cv2.INTER_LINEAR)
-
-        if self.has_depth:
-            depth_path = self.depth_paths[idx]
-            depth = np.array(Image.open(depth_path)) / self.depth_scale
-
-        image = (
-            torch.from_numpy(image / 255.0)
-            .clamp(0.0, 1.0)
-            .permute(2, 0, 1)
-            .to(device=self.device, dtype=self.dtype)
-        )
-
-        return image, depth, pose
 
 class StereoDataset(BaseDataset):
     def __init__(self, args, path, config):
@@ -620,17 +416,6 @@ class TUMDataset(MonocularDataset):
         self.depth_paths = parser.depth_paths
         self.poses = parser.poses
 
-class PandaDataset(MonocularDataset_Panda):
-    def __init__(self, args, path, config):
-        super().__init__(args, path, config)
-        dataset_path = config["Dataset"]["dataset_path"]
-        parser = PandaParser(dataset_path)
-        self.num_imgs = parser.n_img
-        self.color_paths = parser.color_paths
-        self.pred_semantic_paths = parser.pred_semantic_paths
-        self.depth_paths = None
-        self.poses = None
-
 class ReplicaDataset(MonocularDataset):
     def __init__(self, args, path, config):
         super().__init__(args, path, config)
@@ -641,21 +426,23 @@ class ReplicaDataset(MonocularDataset):
         self.depth_paths = parser.depth_paths
         self.poses = parser.poses
         
-class ReplicaDataset_V2(MonocularDataset_V2):
+class ReplicaDataset_Semantic(MonocularDataset):
     def __init__(self, args, path, config):
         super().__init__(args, path, config)
-        hdr = config["Dataset"]["hdr_enable"] if "hdr_enable" in config["Dataset"].keys() else False
-        print(f"hdr enable: {hdr}")
         dataset_path = config["Dataset"]["dataset_path"]
-        parser = ReplicaParser_V2(dataset_path, hdr)
+        parser = ReplicaParser(dataset_path)
         self.num_imgs = parser.n_img
         self.color_paths = parser.color_paths
         self.depth_paths = parser.depth_paths
-        self.semantic_paths = parser.semantic_paths
-        self.vis_semantic_paths = parser.vis_semantic_paths
-        self.pred_semantic_paths = parser.pred_semantic_paths
         self.poses = parser.poses
-
+        self.semantic_paths = sorted(glob.glob(f"{dataset_path}/semantic_class/semantic_class_*.png"))
+        self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.pt"))
+        
+    def get_pred_semantic(self, idx):
+        return self.pred_semantic_paths[idx]
+    
+    def get_gt_semantic(self, idx):
+        return self.semantic_paths[idx]
 
 
 class EurocDataset(StereoDataset):
@@ -767,13 +554,11 @@ def load_dataset(args, path, config):
         return TUMDataset(args, path, config)
     elif config["Dataset"]["type"] == "replica":
         return ReplicaDataset(args, path, config)
-    elif config["Dataset"]["type"] == "replica_v2":
-        return ReplicaDataset_V2(args, path, config)
+    elif config["Dataset"]["type"] == "replica_semantic":
+        return ReplicaDataset_Semantic(args, path, config)
     elif config["Dataset"]["type"] == "euroc":
         return EurocDataset(args, path, config)
     elif config["Dataset"]["type"] == "realsense":
         return RealsenseDataset(args, path, config)
-    elif config["Dataset"]["type"] == "panda":
-        return PandaDataset(args, path, config)
     else:
         raise ValueError("Unknown dataset type")

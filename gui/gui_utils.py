@@ -89,6 +89,7 @@ class GaussianPacket:
         vis_semantic=None,
         keyframes=None,
         finish=False,
+        decoder_ckpts=None,
         kf_window=None,
     ):
         self.has_gaussians = False
@@ -107,8 +108,6 @@ class GaussianPacket:
             self.rotation_activation = torch.nn.functional.normalize
             self.unique_kfIDs = gaussians.unique_kfIDs.clone()
             self.n_obs = gaussians.n_obs.clone()
-            
-            self.semantic_decoder = gaussians.semantic_decoder
 
         self.keyframe = keyframe
         self.current_frame = current_frame
@@ -119,6 +118,10 @@ class GaussianPacket:
         self.keyframes = keyframes
         self.finish = finish
         self.kf_window = kf_window
+        
+        self.semantic_decoder = decoder_ckpts # TODO mapping process
+        torch.cuda.empty_cache()
+
 
     def resize_img(self, img, width):
         if img is None:
@@ -149,7 +152,7 @@ class GaussianPacket:
         return symm
 
 
-def get_latest_queue(q):
+def get_latest_queue(q) -> GaussianPacket:
     message = None
     while True:
         try:

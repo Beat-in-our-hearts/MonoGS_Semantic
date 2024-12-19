@@ -1,7 +1,6 @@
 import json
 import os
-from tqdm import tqdm
-from typing import Dict, List, Union
+import time
 
 import cv2
 import evo
@@ -22,7 +21,7 @@ from gaussian_splatting.utils.image_utils import psnr
 from gaussian_splatting.utils.loss_utils import ssim, l1_loss
 from gaussian_splatting.utils.system_utils import mkdir_p
 from utils.logging_utils import Log
-from utils.camera_utils import Camera
+
 
 def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ## Plot
@@ -39,7 +38,7 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ape_metric.process_data(data)
     ape_stat = ape_metric.get_statistic(metrics.StatisticsType.rmse)
     ape_stats = ape_metric.get_all_statistics()
-    Log("RMSE ATE \[m]", ape_stat, tag="Eval")
+    Log("RMSE ATE \[cm]", ape_stat*100, tag="Eval")
 
     with open(
         os.path.join(plot_dir, "stats_{}.json".format(str(label))),
@@ -114,7 +113,18 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
     wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
     return ate
 
+@torch.no_grad()
+def benchmark_render_time(frame, gaussians, pipe, background, num_iter=2000, flag_semantic=False):
+    start_time = time.time()
+    for _ in range(num_iter):
+        render(frame, gaussians, pipe, background, flag_semantic=flag_semantic)
+    end_time = time.time()
+    FPS = num_iter / (end_time - start_time)
+    Log(f"Render FPS: {FPS}", tag="Eval")
+    return FPS
 
+
+@torch.no_grad()
 def eval_rendering(
     frames,
     gaussians,
@@ -124,11 +134,12 @@ def eval_rendering(
     background,
     kf_indices,
     iteration="final",
+    depth_l1=False,
 ):
     interval = 5
     img_pred, img_gt, saved_frame_idx = [], [], []
     end_idx = len(frames) - 1 if iteration == "final" or "before_opt" else iteration
-    psnr_array, ssim_array, lpips_array = [], [], []
+    psnr_array, ssim_array, lpips_array, depth_l1_array = [], [], [], []
     cal_lpips = LearnedPerceptualImagePatchSimilarity(
         net_type="alex", normalize=True
     ).to("cuda")
@@ -137,9 +148,10 @@ def eval_rendering(
             continue
         saved_frame_idx.append(idx)
         frame = frames[idx]
-        gt_image, _, _ = dataset[idx]
+        gt_image, gt_depth, _ = dataset[idx]
 
-        rendering = render(frame, gaussians, pipe, background)["render"]
+        render_pkg = render(frame, gaussians, pipe, background)
+        rendering = render_pkg["render"]
         image = torch.clamp(rendering, 0.0, 1.0)
 
         gt = (gt_image.cpu().numpy().transpose((1, 2, 0)) * 255).astype(np.uint8)
@@ -161,13 +173,24 @@ def eval_rendering(
         ssim_array.append(ssim_score.item())
         lpips_array.append(lpips_score.item())
 
+        if depth_l1:
+            gt_depth = torch.tensor(gt_depth).cuda()
+            depth_pixel_mask = (gt_depth > 0.01).view(*gt_depth.shape)
+            opacity_mask = (render_pkg["opacity"] > 0.95).view(*gt_depth.shape)
+            depth_mask = depth_pixel_mask * opacity_mask
+            render_depth = render_pkg["depth"][0]
+            depth_l1_score = l1_loss(render_depth[depth_mask], gt_depth[depth_mask])
+            depth_l1_array.append(depth_l1_score.item())
+
     output = dict()
     output["mean_psnr"] = float(np.mean(psnr_array))
     output["mean_ssim"] = float(np.mean(ssim_array))
     output["mean_lpips"] = float(np.mean(lpips_array))
+    output["mean_depth_l1"] = float(np.mean(depth_l1_array)) if depth_l1 else None
 
     Log(
-        f'mean psnr: {output["mean_psnr"]}, ssim: {output["mean_ssim"]}, lpips: {output["mean_lpips"]}',
+        f'mean psnr: {output["mean_psnr"]}, ' + f'ssim: {output["mean_ssim"]}, ' + \
+        f'lpips: {output["mean_lpips"]}, ' + f'depth_l1: {output["mean_depth_l1"]*100}',
         tag="Eval",
     )
 
@@ -182,6 +205,7 @@ def eval_rendering(
     return output
 
 
+
 def save_gaussians(gaussians, name, iteration, final=False):
     if name is None:
         return
@@ -191,4 +215,4 @@ def save_gaussians(gaussians, name, iteration, final=False):
         point_cloud_path = os.path.join(
             name, "point_cloud/iteration_{}".format(str(iteration))
         )
-    gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
+    gaussians.save_ply(point_cloud_path + "_point_cloud.ply")
