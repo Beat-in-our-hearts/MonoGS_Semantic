@@ -7,7 +7,7 @@ class Semantic_Config:
     wandb_enable:bool = False
     save_render_enable:bool = False
     
-    gs_init_lr:float = 10.0
+    gs_init_lr:float = 6.0
     
     semantic_window:int = 5
     semantic_init_iter:int = 5
