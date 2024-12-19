@@ -15,12 +15,13 @@ try:
 except Exception:
     pass
 
+from utils.semantic_setting import Semantic_Config
 
 class ReplicaParser:
     def __init__(self, input_folder):
         self.input_folder = input_folder
-        self.color_paths = sorted(glob.glob(f"{self.input_folder}/results/frame*.jpg"))
-        self.depth_paths = sorted(glob.glob(f"{self.input_folder}/results/depth*.png"))
+        self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb/rgb*.png"))
+        self.depth_paths = sorted(glob.glob(f"{self.input_folder}/depth/depth*.png"))
         self.n_img = len(self.color_paths)
         self.load_poses(f"{self.input_folder}/traj.txt")
 
@@ -655,7 +656,23 @@ class ReplicaDataset_V2(MonocularDataset_V2):
         self.vis_semantic_paths = parser.vis_semantic_paths
         self.pred_semantic_paths = parser.pred_semantic_paths
         self.poses = parser.poses
-
+class ReplicaDataset_Semantic(MonocularDataset):
+    def __init__(self, args, path, config):
+        super().__init__(args, path, config)
+        dataset_path = config["Dataset"]["dataset_path"]
+        parser = ReplicaParser(dataset_path)
+        self.num_imgs = parser.n_img
+        self.color_paths = parser.color_paths
+        self.depth_paths = parser.depth_paths
+        self.poses = parser.poses
+        self.semantic_paths = sorted(glob.glob(f"{dataset_path}/semantic_class/semantic_class_*.png"))
+        self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.pt"))
+        
+    def get_pred_semantic(self, idx):
+        return self.pred_semantic_paths[idx]
+    
+    def get_gt_semantic(self, idx):
+        return self.semantic_paths[idx]
 
 
 class EurocDataset(StereoDataset):
@@ -769,6 +786,8 @@ def load_dataset(args, path, config):
         return ReplicaDataset(args, path, config)
     elif config["Dataset"]["type"] == "replica_v2":
         return ReplicaDataset_V2(args, path, config)
+    elif config["Dataset"]["type"] == "replica_semantic":
+        return ReplicaDataset_Semantic(args, path, config)
     elif config["Dataset"]["type"] == "euroc":
         return EurocDataset(args, path, config)
     elif config["Dataset"]["type"] == "realsense":
