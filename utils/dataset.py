@@ -9,7 +9,6 @@ import trimesh
 from PIL import Image
 
 from gaussian_splatting.utils.graphics_utils import focal2fov
-from utils.common_var import *
 try:
     import pyrealsense2 as rs
 except Exception:
@@ -122,19 +121,6 @@ class TUMParser:
             }
 
             self.frames.append(frame)
-
-
-class PandaParser:
-    def __init__(self, input_folder, hdr=False):
-        self.input_folder = input_folder
-        self.color_paths = sorted(glob.glob(f"{self.input_folder}/images/frame_*.jpg"))
-        if MODE == "LSeg":
-            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_lseg/rgb_*_fmap_CxHxW.pt"))
-        elif MODE == "CLIP":
-            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_clip/clip_embs_*.pt"))
-        elif MODE == "SAM2":
-            self.pred_semantic_paths = sorted(glob.glob(f"{self.input_folder}/rgb_feature_sam2/sam2_embs_*.pt"))
-        self.n_img = len(self.color_paths)
 
 class EuRoCParser:
     def __init__(self, input_folder, start_idx=0):

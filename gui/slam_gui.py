@@ -30,7 +30,6 @@ from utils.camera_utils import Camera
 from utils.logging_utils import Log
 import clip
 from typing import Optional
-from utils.common_var import *
 from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureDecoder
 
 from utils.semantic_setting import Semantic_Config
@@ -692,11 +691,11 @@ class SLAM_GUI:
         
         # [ADD Feature]
         elif self.semantic_chbox.checked and results["feature_map"] is not None and self.cnn_decoder_init:
-            if MODE == "LSeg":
+            if Semantic_Config.mode == "LSeg":
                 feature_map = results["feature_map"]
                 render_shape = feature_map.shape # C H W
                 resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
-                                                    size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                                    size=Semantic_Config.render_size,
                                                     mode="bilinear", align_corners=True).squeeze(0))
                 labels_set = self.default_lables if self.default_lables_chbox.checked else None
                 vis_out = self.feature_decoder.features_to_image(resize_feature_map, labels_set)
@@ -719,11 +718,11 @@ class SLAM_GUI:
                 mix_beta = 1 - mix_alpha
                 mix_img = (mix_alpha * vis_feature_numpy + mix_beta * rgb).astype(np.uint8)
                 render_img = o3d.geometry.Image(mix_img)
-            elif MODE == "CLIP":
+            elif Semantic_Config.mode == "CLIP":
                 feature_map = results["feature_map"]
                 render_shape = feature_map.shape
                 resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
-                                                    size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
+                                                    size=Semantic_Config.render_size,
                                                     mode="bilinear", align_corners=True).squeeze(0))
                 if self.save_clip:
                     torch.save(resize_feature_map, "resize_feature_map.pt")
@@ -734,7 +733,7 @@ class SLAM_GUI:
                 # Image.fromarray(img_clip_pca).save("clip_pca.png")
                 img_clip_pca = cv2.resize(img_clip_pca, (render_shape[2], render_shape[1]))
                 render_img = o3d.geometry.Image(img_clip_pca)
-            elif MODE == "SAM2":
+            elif Semantic_Config.mode == "SAM2":
                 feature_map = results["feature_map"]
                 render_shape = feature_map.shape
                 resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 

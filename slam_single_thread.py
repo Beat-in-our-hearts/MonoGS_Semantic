@@ -35,7 +35,6 @@ from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 
 
 from eval.eval_metrics import Eval_Tracking, Eval_Mapping, Eval_Semantic
-from utils.common_var import *
 from utils.wandb_utils import WandbWriter
 from utils.semantic_utils import build_decoder
 from utils.multiprocessing_utils import FakeQueue
@@ -111,7 +110,7 @@ class SLAM:
         # other local variables
         bg_color = [0, 0, 0]
         self.background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
-
+        self.depth_scale = self.config["Dataset"]["Calibration"]["depth_scale"]
 
     def __setup_gaussians(self):
         # Initialize the Dataset
@@ -119,7 +118,7 @@ class SLAM:
         
         # Initialize the Gaussian Model
         self.gaussians = GaussianModel(self.model_params.sh_degree, config=self.config)
-        self.gaussians.init_lr(GS_INIT_LR)
+        self.gaussians.init_lr(Semantic_Config.gs_init_lr)
         self.gaussians.training_setup(self.opt_params)
         
         # set projection_matrixv
@@ -157,7 +156,6 @@ class SLAM:
         # CNN Decoder to upsample semantic features
         # cnn_ckpt_path = "checkpoints/cnn_decoder_dim{SEMANTIC_FEATURES_DIM}_{Distilled_Feature_DIM}.pth"
         # self.decoder_init = True
-        # self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, Distilled_Feature_DIM, kernel_size=1).to("cuda")
         # if os.path.exists(cnn_ckpt_path):
         #     self.cnn_decoder.load_state_dict(torch.load(cnn_ckpt_path, weights_only=True))
         # self.cnn_decoder_optimizer = torch.optim.Adam(self.cnn_decoder.parameters(), lr=0.0005)
@@ -474,7 +472,7 @@ class SLAM:
             gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
         for mapping_iteration in range(self.init_itr_num):
             self.map_iteration_count += 1
-            render_semantic_flag = Semantic_Config.enable and mapping_iteration > self.init_itr_num - MAPPING_START_ITR
+            render_semantic_flag = Semantic_Config.enable and mapping_iteration > self.init_itr_num - Semantic_Config.semantic_init_iter
             render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=render_semantic_flag)
             (image, viewspace_point_tensor, visibility_filter, radii, depth, opacity, n_touched, feature_map) = (
                 render_pkg["render"],
@@ -488,8 +486,8 @@ class SLAM:
             )
             loss_init = get_loss_mapping(self.config, image, depth, viewpoint, opacity, initialization=True)
             if render_semantic_flag:
-                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
-                                                             size=(FMAP_SIZE[0], FMAP_SIZE[1]),
+                fmap_size = Semantic_Config.famp_size[Semantic_Config.mode]
+                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=fmap_size,
                                                             mode="bilinear", align_corners=True).squeeze(0))
                 # print(feature_map.shape, gt_feature.shape)
                 l1_feature = l1_loss(feature_map, gt_feature)
@@ -548,7 +546,7 @@ class SLAM:
             
             for cam_idx in range(len(self.current_window)):
                 viewpoint = viewpoint_stack[cam_idx]
-                render_semantic_flag = Semantic_Config.enable and mapping_iteration > iters - MAPPING_ITR
+                render_semantic_flag = Semantic_Config.enable and mapping_iteration > iters - Semantic_Config.semantic_iter
                 render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=render_semantic_flag)
                 (image, viewspace_point_tensor, visibility_filter, radii, depth, opacity, n_touched, feature_map) = (
                     render_pkg["render"],
@@ -562,8 +560,8 @@ class SLAM:
                 )
                 loss_mapping += get_loss_mapping(self.config, image, depth, viewpoint, opacity)
                 if render_semantic_flag:
-                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
-                                                                size=(FMAP_SIZE[0], FMAP_SIZE[1]),
+                    fmap_size = Semantic_Config.famp_size[Semantic_Config.mode]
+                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), fmap_size,
                                                                 mode="bilinear", align_corners=True).squeeze(0))
                     gt_feature = gt_feature_stack[cam_idx]
                     l1_feature = l1_loss(feature_map, gt_feature)
@@ -797,7 +795,7 @@ class SLAM:
             self.wandb_writer.add_scalars(descriptor="semantic_metrics/", values=output_dict["semantic_metrics"], global_step=global_step)
     
     def save_render(self, cur_frame_idx, viewpoint:Camera):
-        if not Semantic_Config.render_enable:
+        if not Semantic_Config.save_render_enable:
             return 
         
         render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background) 
@@ -821,7 +819,7 @@ class SLAM:
         render_rgb_path = os.path.join(render_save_path, "render", 'rgb', f"rgb_{cur_frame_idx:04d}.png")
         cv2.imwrite(render_rgb_path, render_rgb)
         
-        render_depth = (render_depth * SAVE_DEPTH_SCALE).cpu().detach().numpy().astype(np.uint16)
+        render_depth = (render_depth * self.depth_scale).cpu().detach().numpy().astype(np.uint16)
         render_depth_path = os.path.join(render_save_path, "render", 'depth', f"depth_{cur_frame_idx:04d}.png")
         cv2.imwrite(render_depth_path, render_depth)
         

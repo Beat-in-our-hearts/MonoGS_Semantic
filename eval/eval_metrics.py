@@ -27,7 +27,6 @@ from gaussian_splatting.utils.system_utils import mkdir_p
 from utils.logging_utils import Log
 from utils.camera_utils import Camera
 
-from utils.common_var import *
 from eval.segmentationMetric import SegmentationMetric
 from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureDecoder
 
@@ -177,10 +176,10 @@ def Eval_Semantic(cameras:Dict[int, Camera], dataset,
     pixAcc_list = []
     mIoU_list = []
     # Load the feature upsample decoder
-    cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, Distilled_Feature_DIM, kernel_size=1).to("cuda")
-    state_dict_cpu = gaussians.semantic_decoder
-    cnn_decoder.load_state_dict({key: value.cuda() for key, value in state_dict_cpu.items()})
-    cnn_decoder.eval()
+    # cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, Distilled_Feature_DIM, kernel_size=1).to("cuda")
+    # state_dict_cpu = gaussians.semantic_decoder
+    # cnn_decoder.load_state_dict({key: value.cuda() for key, value in state_dict_cpu.items()})
+    # cnn_decoder.eval()
     # Load the feature encoder
     feature_decoder = LSeg_FeatureDecoder(debug=False)
     # print(feature_decoder.labels)

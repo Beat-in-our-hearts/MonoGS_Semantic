@@ -3,7 +3,7 @@ Results:
   save_dir: "results"
   save_trj: True
   save_trj_kf_intv: 10
-  use_gui: True
+  use_gui: False
   eval_rendering: False
   use_wandb: False
 
@@ -13,8 +13,7 @@ Dataset:
   pcd_downsample_init: 16
   adaptive_pointsize: True
   point_size: 0.05
-  type: 'replica_v2'
-  hdr_enable: True
+  type: 'replica_semantic'
   
   Calibration:
     fx: 600.0
@@ -33,22 +32,20 @@ Dataset:
 
 
 Training:
-  semantic_enable: False
-  
   init_itr_num: 1000
   init_gaussian_update: 100
   init_gaussian_reset: 500
   init_gaussian_th: 0.005
   init_gaussian_extent: 30
-  tracking_itr_num: 500 # 200
-  mapping_itr_num: 100 # 50
+  tracking_itr_num: 100 # 200
+  mapping_itr_num: 50 # 50
   gaussian_update_every: 150
   gaussian_update_offset: 50
   gaussian_th: 0.7
   gaussian_extent: 1.0
   gaussian_reset: 2001
   size_threshold: 20
-  kf_interval: 1
+  kf_interval: 5 # 5
   window_size: 10
   pose_window: 5
   edge_threshold: 4
@@ -58,7 +55,7 @@ Training:
 
   kf_translation: 0.04
   kf_min_translation: 0.01 # 0.02
-  kf_overlap: 0.75
+  kf_overlap: 0.9
   prune_mode: 'slam'
   single_thread: True
   spherical_harmonics: False
@@ -77,7 +74,6 @@ opt_params:
   opacity_lr: 0.05
   scaling_lr: 0.001
   rotation_lr: 0.001
-  semantic_feature_lr: 0.005
   percent_dense: 0.01
   lambda_dssim: 0.2
   densification_interval: 100
@@ -85,6 +81,8 @@ opt_params:
   densify_from_iter: 500
   densify_until_iter: 15000
   densify_grad_threshold: 0.0002
+
+  semantic_feature_lr: 0.005
 
 model_params:
   sh_degree: 0

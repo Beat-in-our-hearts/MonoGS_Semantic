@@ -3,7 +3,7 @@ import wandb
 from typing import Any
 import numpy as np
 import torch
-from utils.common_var import WANDB_ENABLED
+from utils.semantic_setting import Semantic_Config
 
 class WandbWriter:
     def __init__(self, project=None, run_name=None, resume=False, run_id =None):
@@ -15,7 +15,7 @@ class WandbWriter:
         """
         
         self.use_wandb = False
-        if project != None and WANDB_ENABLED:
+        if project != None and Semantic_Config.wandb_enable:
             self.use_wandb = True
             
         if self.use_wandb: 

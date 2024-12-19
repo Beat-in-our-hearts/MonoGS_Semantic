@@ -22,7 +22,6 @@ from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_tracking, get_median_depth
 from gui import gui_utils
 
-from utils.common_var import *
 from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureExtractor
 
 class FrontEnd_Track(mp.Process):

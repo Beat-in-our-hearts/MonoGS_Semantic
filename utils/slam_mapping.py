@@ -19,7 +19,7 @@ from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_mapping
 from utils.camera_utils import Camera
 
-from utils.common_var import *
+
 
 class BackEnd_Map(mp.Process):
     def __init__(self, config):
