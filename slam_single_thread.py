@@ -884,7 +884,7 @@ class SLAM:
                 track_start_time = time.time()
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
                 # ate_output = Eval_frame_pose(viewpoint, monocular=self.monocular)
-                # print(f"[{cur_frame_idx}] track time: {time.time()-track_start_time}")
+                print(f"[{cur_frame_idx}] track time: {time.time()-track_start_time}")
                 
                 self.save_render(cur_frame_idx, viewpoint)
 

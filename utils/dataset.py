@@ -19,7 +19,7 @@ from utils.semantic_setting import Semantic_Config
 class ReplicaParser:
     def __init__(self, input_folder):
         self.input_folder = input_folder
-        self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb_hdr/rgb*.png"))
+        self.color_paths = sorted(glob.glob(f"{self.input_folder}/rgb/rgb*.png"))
         self.depth_paths = sorted(glob.glob(f"{self.input_folder}/depth/depth*.png"))
         self.n_img = len(self.color_paths)
         self.load_poses(f"{self.input_folder}/traj.txt")
