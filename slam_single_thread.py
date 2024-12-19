@@ -153,7 +153,7 @@ class SLAM:
         if "semantic_enable" in self.config["Training"]:
             self.semantic_flag = self.config["Training"]["semantic_enable"]
         else:
-            self.semantic_flag = True
+            self.semantic_flag = False
         self.decoder_init = False
         self.save_semantic = True
         self.save_frame_visualize = True
