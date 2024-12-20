@@ -120,7 +120,7 @@ class Camera(nn.Module):
         return getWorld2View2(self.R, self.T).transpose(0, 1)
 
     @property
-    def full_proj_transform(self):
+    def full_proj_transform(self): # 4.3s/10000f
         return (
             self.world_view_transform.unsqueeze(0).bmm(
                 self.projection_matrix.unsqueeze(0)
