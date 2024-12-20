@@ -662,7 +662,7 @@ class SLAM:
                 pose_optimizer.zero_grad()
                 
                 if Semantic_Config.Pose_BA_flag:
-                    
+                    # TODO pose_window BA_window 
                     if len(self.current_window) > Semantic_Config.track_setting["BA_window"]:
                         BA_len = Semantic_Config.track_setting["BA_window"]
                     else:
