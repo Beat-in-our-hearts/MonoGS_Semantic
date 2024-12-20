@@ -28,9 +28,6 @@ from gui.gui_utils import (
 )
 from utils.camera_utils import Camera
 from utils.logging_utils import Log
-import clip
-from typing import Optional
-from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureDecoder
 
 from utils.semantic_setting import Semantic_Config
 from utils.semantic_utils import apply_pca_colormap

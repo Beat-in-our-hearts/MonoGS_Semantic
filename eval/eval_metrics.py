@@ -28,7 +28,7 @@ from utils.logging_utils import Log
 from utils.camera_utils import Camera
 
 from eval.segmentationMetric import SegmentationMetric
-from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureDecoder
+# from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureDecoder
 
 def gen_pose_matrix(R, T):
     pose = np.eye(4)

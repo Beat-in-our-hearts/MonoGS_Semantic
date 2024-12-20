@@ -2,6 +2,9 @@ from dataclasses import dataclass
 
 @dataclass
 class Semantic_Config:
+    wandb_project:str = "GSDFF_SLAM"
+    save_root_dir:str = "results/replica"
+    
     mode:str = "SAM2"
     enable:bool = False
     wandb_enable:bool = False
@@ -26,6 +29,9 @@ class Semantic_Config:
         "SAM2": "rgb_feature_sam2"
     }
     render_size = [360, 480]
+
+
+
 
     
     
