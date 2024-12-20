@@ -6,13 +6,12 @@ class Semantic_Config:
     save_root_dir:str = "results/replica"
     
     mode:str = "SAM2"
-    enable:bool = False
+    enable:bool = True
     wandb_enable:bool = False
-    save_render_enable:bool = False
     
     gs_init_lr:float = 10.0
     
-    semantic_window:int = 5
+    semantic_window:int = 4
     semantic_init_iter:int = 5
     semantic_iter:int = 5
     
@@ -32,7 +31,7 @@ class Semantic_Config:
     
     Debug = False
     log_file = "results/slam_sp.log"
-    delete_save_dir = True
+    delete_save_dir = False
     Pose_BA_flag = False
     track_setting = {
         'kf_only_iou': True,

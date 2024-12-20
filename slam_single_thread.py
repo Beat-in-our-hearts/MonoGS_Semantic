@@ -37,12 +37,10 @@ from utils.wandb_utils import wandb_init
 from utils.semantic_utils import build_decoder
 from utils.multiprocessing_utils import FakeQueue
 from utils.semantic_setting import Semantic_Config
-
+from utils.semantic_utils import apply_pca_colormap
 
 class SLAM:
     def __init__(self, config, save_dir=None):
-        self.tim_start = torch.cuda.Event(enable_timing=True)
-        self.tim_end = torch.cuda.Event(enable_timing=True)
         self.config = config
         self.save_dir = save_dir
         self.__setup_params()
@@ -282,7 +280,7 @@ class SLAM:
         self.q_main2vis.put(
             gui_utils.GaussianPacket(
                 current_frame=viewpoint,
-                gtcolor=viewpoint.original_image,
+                gtcolor=viewpoint.original_image.permute(1, 2, 0).cpu().numpy(),
                 gtdepth=viewpoint.depth
                 if not self.monocular
                 else np.zeros((viewpoint.image_height, viewpoint.image_width)),
@@ -489,6 +487,42 @@ class SLAM:
         torch.cuda.empty_cache()
         return render_pkg
     
+    def map_semantic(self, iters=1, window_size=2):
+        if not Semantic_Config.enable:
+            return
+        if len(self.current_window) == 0:
+            return
+        semantic_window = self.current_window[:window_size]
+        viewpoint_stack = [self.cameras[kf_idx] for kf_idx in semantic_window]
+        gt_feature_stack = []
+        for i in range(len(semantic_window)):
+            gt_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
+            gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
+            gt_feature_stack.append(gt_feature)
+        
+        semantic_loss = []
+        for _ in range(iters):
+            loss_semantic = 0
+            for cam_idx in range(len(semantic_window)):
+                viewpoint = viewpoint_stack[cam_idx]
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
+                feature_map = render_pkg["feature_map"]
+                fmap_size = Semantic_Config.famp_size[Semantic_Config.mode]
+                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), fmap_size,
+                                                            mode="bilinear", align_corners=True).squeeze(0))
+                gt_feature = gt_feature_stack[cam_idx]
+                l1_feature = l1_loss(feature_map, gt_feature)
+                loss_semantic += l1_feature
+                
+            semantic_loss.append(loss_semantic.item())
+            loss_semantic.backward()
+            with torch.no_grad():
+                self.cnn_decoder_optimizer.step()
+                self.cnn_decoder_optimizer.zero_grad()
+                self.gaussians.semantic_optimizer.step()
+                self.gaussians.semantic_optimizer.zero_grad()
+                
+
     def map_full_window(self, prune=False, iters=1):
         if len(self.current_window) == 0:
             return 
@@ -661,10 +695,11 @@ class SLAM:
                 depth_l1=not self.monocular
             )
         N_frames = len(self.cameras)
-        cost_time = self.tim_start.elapsed_time(self.tim_end) * 0.001
+        
+        cost_time = self.tim_end - self.tim_start
         FPS = N_frames / cost_time
-        Log("Total time", cost_time, tag="Eval")
-        Log("Total FPS", FPS, tag="Eval")
+        Log("Total time", f"{cost_time:.1f}", tag="Eval")
+        Log("Total FPS", f"{FPS:.3f}", tag="Eval")
         
         # random select one frame
         random_frame_idx = random.choice(list(self.cameras.keys()))
@@ -775,7 +810,7 @@ class SLAM:
             lambda_ssim = self.opt_params.lambda_dssim
             lambda_rgb = 0.9
             gt_image = viewpoint_cam.original_image.cuda()
-            gt_depth = viewpoint_cam.gt_depth.cuda()
+            gt_depth = torch.tensor(viewpoint_cam.depth).cuda()
             if self.monocular:
                 Ll1 = l1_loss(image, gt_image)
             else:
@@ -815,7 +850,7 @@ class SLAM:
             time.sleep(1)
             viewpoint = Camera.init_from_dataset(self.dataset, cur_frame_idx, self.projection_matrix)
             self.q_main2vis.put(gui_utils.GaussianPacket(gaussians=self.gaussians,
-                                                        gtcolor=viewpoint.original_image,
+                                                        gtcolor=viewpoint.original_image.permute(1, 2, 0).cpu().numpy(),
                                                         gtdepth=viewpoint.depth
                                                         if not self.monocular
                                                         else np.zeros((viewpoint.image_height, viewpoint.image_width)),
@@ -884,15 +919,20 @@ class SLAM:
             json.dump(resume_info, f, indent=4)
                     
     def save_render(self, cur_frame_idx, viewpoint:Camera):
-        if not Semantic_Config.save_render_enable:
+        if not self.eval_rendering:
             return 
         
-        render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background) 
+        render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background,
+                            flag_semantic=Semantic_Config.enable) 
         
         render_depth = render_pkg["depth"][0]
-        render_save_path = os.path.join(self.save_dir, "render")
-        if not os.path.exists(render_save_path):
-            os.mkdir(render_save_path)
+        rgb_root_dir = os.path.join(self.save_dir, "render", 'rgb')
+        depth_root_dir = os.path.join(self.save_dir, "render", 'depth')
+        semantic_root_dir = os.path.join(self.save_dir, "render", 'semantic')
+        os.makedirs(rgb_root_dir, exist_ok=True)
+        os.makedirs(depth_root_dir, exist_ok=True)
+        if Semantic_Config.enable:
+            os.makedirs(semantic_root_dir, exist_ok=True)
         
         # cv2 save image 
         render_rgb = (
@@ -905,16 +945,28 @@ class SLAM:
             )
         render_rgb = render_rgb[..., ::-1]
         
-        render_rgb_path = os.path.join(render_save_path, "render", 'rgb', f"rgb_{cur_frame_idx:04d}.png")
+        render_rgb_path = os.path.join(rgb_root_dir, f"rgb_{cur_frame_idx:04d}.png")
         cv2.imwrite(render_rgb_path, render_rgb)
         
         render_depth = (render_depth * self.depth_scale).cpu().detach().numpy().astype(np.uint16)
-        render_depth_path = os.path.join(render_save_path, "render", 'depth', f"depth_{cur_frame_idx:04d}.png")
+        render_depth_path = os.path.join(depth_root_dir, f"depth_{cur_frame_idx:04d}.png")
         cv2.imwrite(render_depth_path, render_depth)
         
         # TODO
         if Semantic_Config.enable:
-            pass
+            feature_map = render_pkg["feature_map"]
+            render_shape = feature_map.shape
+            resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                size= Semantic_Config.render_size,
+                                                mode="bilinear", align_corners=True).squeeze(0))
+            
+            sam2_pca = apply_pca_colormap(resize_feature_map.permute(1, 2, 0)).detach().cpu().numpy() # H W C
+            img_sam2_pca = (sam2_pca*255).astype(np.uint8)
+            img_sam2_pca = cv2.resize(img_sam2_pca, (render_shape[2], render_shape[1]))
+            render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
+            cv2.imwrite(render_semantic_path, img_sam2_pca)
+        debug(f"Saved render: {cur_frame_idx}")
+
     
     def run(self, resume=False, eval=False):
         cur_frame_idx = 0
@@ -934,10 +986,10 @@ class SLAM:
             while True:
                 time.sleep(1)
         else:
-            self.tim_start.record()
+            self.tim_start = time.time()
             while True:
                 if cur_frame_idx > len(self.dataset) - 1:
-                    self.tim_end.record()
+                    self.tim_end = time.time()
                     self.save_state_dict('final')
                     self.eval()
                 elif len(self.keyframe_indices) % self.save_trj_kf_intv == 0 \
@@ -961,6 +1013,7 @@ class SLAM:
                     self.map_rest()
                     self.map_add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map, init=True)
                     self.map_init(cur_frame_idx, viewpoint)
+                    self.map_semantic(iters=Semantic_Config.semantic_init_iter)
                     cur_frame_idx += 1
                     continue
                 
@@ -973,7 +1026,7 @@ class SLAM:
                 # ate_output = Eval_frame_pose(viewpoint, monocular=self.monocular)
                 debug(f"[{cur_frame_idx}] track time: {time.time()-track_start_time}")
                 
-                # self.save_render(render_pkg, cur_frame_idx)
+                self.save_render(cur_frame_idx, viewpoint)
                 # update GUI
                 self.update_gui(viewpoint)
                 # check keyframe
@@ -1005,8 +1058,9 @@ class SLAM:
                     map_itr_num = self.mapping_itr_num 
                     self.map_full_window(iters=map_itr_num)
                     self.map_full_window(prune=True)
+                    self.map_semantic(Semantic_Config.semantic_iter, Semantic_Config.semantic_window)
 
-                    info(f"[{cur_frame_idx}] map time: {time.time()-map_start_time:.1f} keyframes_num: {len(self.keyframe_indices)} map_window:{self.current_window}")
+                    info(f"[{cur_frame_idx:04d}] map time: {time.time()-map_start_time:.1f} keyframes_num: {len(self.keyframe_indices)} map_window:{self.current_window}")
                 else:
                     # delete the frame
                     self.cameras[cur_frame_idx].clean() 
@@ -1037,16 +1091,22 @@ class SLAM:
             current_window_dict[self.current_window[0]] = self.current_window[1:]
             keyframes = [Camera.copy_camera(self.cameras[kf_idx]) for kf_idx in self.current_window]
 
+            decoder_state_dict_cpu = None
+            if Semantic_Config.enable:
+                decoder_state_dict = self.cnn_decoder.state_dict()
+                decoder_state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
+            
             self.q_main2vis.put(
                     gui_utils.GaussianPacket(
                         gaussians=self.gaussians,
-                        gtcolor=viewpoint.original_image,
+                        gtcolor=viewpoint.original_image.permute(1, 2, 0).cpu().numpy(),
                         gtdepth=viewpoint.depth
                         if not self.monocular
                         else np.zeros((viewpoint.image_height, viewpoint.image_width)),
                         current_frame=viewpoint,
                         keyframes=keyframes,
                         kf_window=current_window_dict,
+                        decoder_ckpts=decoder_state_dict_cpu
                     )
                 )
     
@@ -1066,6 +1126,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_path", type=str, default=None)
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--headless", action="store_true")
 
     args = parser.parse_args(sys.argv[1:])
     mp.set_start_method("spawn")
@@ -1074,8 +1135,8 @@ if __name__ == "__main__":
         config = yaml.safe_load(yml)
     config = load_config(args.config)
        
-    # eval 
-    if args.eval:
+    # headless eval 
+    if args.headless:
         Log("Running MonoGS in Evaluation Mode")
         Log("Following config will be overriden")
         Log("\tsave_results=True")
@@ -1119,7 +1180,8 @@ if __name__ == "__main__":
             os.makedirs(save_dir, exist_ok=True)
 
     # run
-    info(datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"))
+    start_time = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    info(f"Time: {start_time}")
     slam = SLAM(config, save_dir=save_dir)
     slam.run(resume=args.resume, eval= args.eval)
     slam.close()
