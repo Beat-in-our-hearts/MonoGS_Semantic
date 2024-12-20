@@ -1,5 +1,5 @@
 import time
-
+from typing import Dict, List, Union
 import numpy as np
 import torch
 import torch.nn as nn
@@ -9,17 +9,19 @@ import torch.nn.functional as F
 from PIL import Image
 
 from gaussian_splatting.gaussian_renderer import render
+from gaussian_splatting.scene.gaussian_model import GaussianModel
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from gui import gui_utils
 from utils.camera_utils import Camera
 from utils.eval_utils import eval_ate, save_gaussians
 from utils.logging_utils import Log
+from utils.camera_utils import Camera
 from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_tracking, get_median_depth
 
-
-from feature_encoder.lseg_encoder.feature_extractor import LSeg_FeatureExtractor
+from utils.semantic_utils import build_decoder
+from utils.semantic_setting import Semantic_Config
 
 class FrontEnd(mp.Process):
     def __init__(self, config):
@@ -27,12 +29,15 @@ class FrontEnd(mp.Process):
         self.config = config
         self.background = None
         self.pipeline_params = None
-        self.frontend_queue = None
-        self.backend_queue = None
-        self.q_main2vis = None
-        self.q_vis2main = None
-
+        self.frontend_queue:mp.Queue = None
+        self.backend_queue:mp.Queue = None
+        self.q_main2vis:mp.Queue = None
+        self.q_vis2main:mp.Queue = None
+        self.dataset = None
+        
+        self.semantic_init = False
         self.initialized = False
+        self.use_gui = False
         self.kf_indices = []
         self.monocular = config["Training"]["monocular"]
         self.iteration_count = 0
@@ -44,14 +49,13 @@ class FrontEnd(mp.Process):
         self.requested_keyframe = 0
         self.use_every_n_frames = 1
 
-        self.gaussians = None
-        self.cameras = dict()
+        self.gaussians:GaussianModel = None
+        self.cameras:Dict[int, Camera] = dict()
         self.device = "cuda:0"
         self.pause = False
         
         # CNN Decoder to upsample semantic features
-        self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, LSeg_FEATURES_DIM, kernel_size=1).to(self.device)
-        self.cnn_decoder.eval() # no gradient
+        self.cnn_decoder, _ = build_decoder(mode='eval')
 
     def set_hyperparams(self):
         self.save_dir = self.config["Results"]["save_dir"]
@@ -64,20 +68,15 @@ class FrontEnd(mp.Process):
         self.window_size = self.config["Training"]["window_size"]
         self.single_thread = self.config["Training"]["single_thread"]
     
-    def set_feature_extractor(self):
-        self.feature_extractor = LSeg_FeatureExtractor(debug=True)
-        self.feature_extractor.eval()
+    # def set_feature_extractor(self):
+    #     self.feature_extractor = LSeg_FeatureExtractor(debug=True)
+    #     self.feature_extractor.eval()
         
     def add_new_keyframe(self, cur_frame_idx, depth=None, opacity=None, init=False):
         rgb_boundary_threshold = self.config["Training"]["rgb_boundary_threshold"]
         self.kf_indices.append(cur_frame_idx)
         viewpoint = self.cameras[cur_frame_idx]
         gt_img = viewpoint.original_image.cuda()
-        
-        # NOTE: [add feature map to the gaussians] cur_semantic_feature: numpy array of shape (H, W, C)
-        cur_semantic_feature, cur_vis_feature, _ = self.feature_extractor(gt_img)
-        viewpoint.semantic_feature = cur_semantic_feature
-        viewpoint.vis_semantic_feature = cur_vis_feature
         
         valid_rgb = (gt_img.sum(dim=0) > rgb_boundary_threshold)[None]
         if self.monocular:
@@ -127,7 +126,7 @@ class FrontEnd(mp.Process):
         initial_depth[~valid_rgb.cpu()] = 0  # Ignore the invalid rgb pixels
         return initial_depth[0].numpy()
 
-    def initialize(self, cur_frame_idx, viewpoint):
+    def initialize(self, cur_frame_idx, viewpoint:Camera):
         self.initialized = not self.monocular
         self.kf_indices = []
         self.iteration_count = 0
@@ -135,7 +134,7 @@ class FrontEnd(mp.Process):
         self.current_window = []
         
         # NOTE: init feature extractor
-        self.set_feature_extractor()
+        # self.set_feature_extractor()
         
         # remove everything from the queues
         while not self.backend_queue.empty():
@@ -151,13 +150,13 @@ class FrontEnd(mp.Process):
         self.q_main2vis.put(
             gui_utils.GaussianPacket(
                 current_frame=viewpoint,
-                gtcolor=viewpoint.original_image,
+                gtcolor=viewpoint.original_image.permute(1, 2, 0).cpu().numpy(),
                 gtdepth=viewpoint.depth
                 if not self.monocular
                 else np.zeros((viewpoint.image_height, viewpoint.image_width)),
             ))
 
-    def tracking(self, cur_frame_idx, viewpoint):
+    def tracking(self, cur_frame_idx, viewpoint:Camera):
         prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
         viewpoint.update_RT(prev.R, prev.T)
 
@@ -192,7 +191,7 @@ class FrontEnd(mp.Process):
         )
 
         pose_optimizer = torch.optim.Adam(opt_params)
-        vis_feature = self.vis_current_frame(viewpoint, cur_frame_idx)
+        # vis_feature = self.vis_current_frame(viewpoint, cur_frame_idx)
         for tracking_itr in range(self.tracking_itr_num):
             render_pkg = render(
                 viewpoint, self.gaussians, self.pipeline_params, self.background
@@ -212,31 +211,21 @@ class FrontEnd(mp.Process):
                 pose_optimizer.step()
                 converged = update_pose(viewpoint)
 
-            if tracking_itr % 30 == 0:
-                self.q_main2vis.put(
-                    gui_utils.GaussianPacket(
-                        current_frame=viewpoint,
-                        gtcolor=viewpoint.original_image,
-                        gtdepth=viewpoint.depth
-                        if not self.monocular
-                        else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-                        vis_semantic=vis_feature
-                    )
-                )
+            # if tracking_itr % 30 == 0:
+            #     self.q_main2vis.put(
+            #         gui_utils.GaussianPacket(
+            #             current_frame=viewpoint,
+            #             gtcolor=viewpoint.original_image.permute(1, 2, 0).cpu().numpy(),
+            #             gtdepth=viewpoint.depth
+            #             if not self.monocular
+            #             else np.zeros((viewpoint.image_height, viewpoint.image_width)),
+            #         )
+            #     )
             if converged:
                 break
         self.median_depth = get_median_depth(depth, opacity)
         return render_pkg
     
-    def vis_current_frame(self, viewpoint, cur_frame_idx):
-        render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
-        feature_map = render_pkg["feature_map"]
-        feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
-                    mode="bilinear", align_corners=True).squeeze(0))
-        vis_feature, _ = self.feature_extractor.features_to_image(feature_map)
-        image = Image.fromarray(vis_feature)
-        image.save(f"vis/vis_feature_{cur_frame_idx}.png")
-        return vis_feature
         
     def is_keyframe(
         self,
@@ -344,11 +333,15 @@ class FrontEnd(mp.Process):
         self.requested_init = True
 
     def sync_backend(self, data):
-        self.gaussians = data[1]
+        # TODO
+        self.gaussians.load_state_dict(data[1])
         occ_aware_visibility = data[2]
         keyframes = data[3]
         received_state_dict = data[4]
-        self.cnn_decoder.load_state_dict({key: value.cuda() for key, value in received_state_dict.items()})
+        
+        if received_state_dict is not None:
+            self.cnn_decoder.load_state_dict({key: value.cuda() for key, value in received_state_dict.items()})
+            self.semantic_init = True
         self.occ_aware_visibility = occ_aware_visibility
 
         for kf_id, kf_R, kf_T in keyframes:
@@ -358,7 +351,32 @@ class FrontEnd(mp.Process):
         self.cameras[cur_frame_idx].clean()
         if cur_frame_idx % 10 == 0:
             torch.cuda.empty_cache()
+            
+    def update_gui(self, viewpoint:Camera):
+        if self.use_gui:
+            current_window_dict = {}
+            current_window_dict[self.current_window[0]] = self.current_window[1:]
+            keyframes = [Camera.copy_camera(self.cameras[kf_idx]) for kf_idx in self.current_window]
 
+            decoder_state_dict_cpu = None
+            if Semantic_Config.enable and self.semantic_init:
+                decoder_state_dict = self.cnn_decoder.state_dict()
+                decoder_state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
+            
+            self.q_main2vis.put(
+                    gui_utils.GaussianPacket(
+                        gaussians=self.gaussians,
+                        gtcolor=viewpoint.original_image.permute(1, 2, 0).cpu().numpy(),
+                        gtdepth=viewpoint.depth
+                        if not self.monocular
+                        else np.zeros((viewpoint.image_height, viewpoint.image_width)),
+                        current_frame=viewpoint,
+                        keyframes=keyframes,
+                        kf_window=current_window_dict,
+                        decoder_ckpts=decoder_state_dict_cpu
+                    )
+                )
+            
     def run(self):
         cur_frame_idx = 0
         projection_matrix = getProjectionMatrix2(
@@ -439,17 +457,7 @@ class FrontEnd(mp.Process):
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
                 print("Tracking time: ", time.time() - start_time)
 
-                current_window_dict = {}
-                current_window_dict[self.current_window[0]] = self.current_window[1:]
-                keyframes = [Camera.copy_camera(self.cameras[kf_idx]) for kf_idx in self.current_window]
-                self.q_main2vis.put(
-                    gui_utils.GaussianPacket(
-                        gaussians=clone_obj(self.gaussians),
-                        current_frame=viewpoint,
-                        keyframes=keyframes,
-                        kf_window=current_window_dict,
-                    )
-                )
+                self.update_gui(viewpoint)
 
                 if self.requested_keyframe > 0:
                     self.cleanup(cur_frame_idx)
@@ -502,15 +510,15 @@ class FrontEnd(mp.Process):
                         cur_frame_idx, viewpoint, self.current_window, depth_map
                     )
     
-                    self.q_main2vis.put(
-                        gui_utils.GaussianPacket(
-                            current_frame=viewpoint,
-                            gtcolor=viewpoint.original_image,
-                            gtdepth=viewpoint.depth
-                            if not self.monocular
-                            else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-                        )
-                    )
+                    # self.q_main2vis.put(
+                    #     gui_utils.GaussianPacket(
+                    #         current_frame=viewpoint,
+                    #         gtcolor=viewpoint.original_image,
+                    #         gtdepth=viewpoint.depth
+                    #         if not self.monocular
+                    #         else np.zeros((viewpoint.image_height, viewpoint.image_width)),
+                    #     )
+                    # )
                 else:
                     self.cleanup(cur_frame_idx)
                 cur_frame_idx += 1
@@ -549,7 +557,7 @@ class FrontEnd(mp.Process):
                     self.requested_init = False
                     self.q_main2vis.put(
                         gui_utils.GaussianPacket(
-                            gaussians=clone_obj(self.gaussians),
+                            gaussians=self.gaussians,
                         )
                     )
                 elif data[0] == "stop":

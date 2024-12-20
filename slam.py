@@ -21,6 +21,7 @@ from utils.multiprocessing_utils import FakeQueue
 from utils.slam_backend import BackEnd
 from utils.slam_frontend import FrontEnd
 
+from utils.semantic_setting import Semantic_Config
 
 class SLAM:
     def __init__(self, config, save_dir=None):
@@ -51,7 +52,9 @@ class SLAM:
         model_params.sh_degree = 3 if self.use_spherical_harmonics else 0
 
         self.gaussians = GaussianModel(model_params.sh_degree, config=self.config)
-        self.gaussians.init_lr(6.0)
+        self.track_gaussians = GaussianModel(model_params.sh_degree, config=self.config)
+        
+        self.gaussians.init_lr(Semantic_Config.gs_init_lr)
         self.dataset = load_dataset(
             model_params, model_params.source_path, config=config
         )
@@ -73,14 +76,17 @@ class SLAM:
         self.backend = BackEnd(self.config)
 
         self.frontend.dataset = self.dataset
+        self.frontend.gaussians = self.track_gaussians
         self.frontend.background = self.background
         self.frontend.pipeline_params = self.pipeline_params
         self.frontend.frontend_queue = frontend_queue
         self.frontend.backend_queue = backend_queue
         self.frontend.q_main2vis = q_main2vis
         self.frontend.q_vis2main = q_vis2main
+        self.frontend.use_gui = self.use_gui
         self.frontend.set_hyperparams()
 
+        self.backend.dataset = self.dataset
         self.backend.gaussians = self.gaussians
         self.backend.background = self.background
         self.backend.cameras_extent = 6.0

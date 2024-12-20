@@ -8,19 +8,20 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from gaussian_splatting.gaussian_renderer import render
+from gaussian_splatting.scene.gaussian_model import GaussianModel
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
 from utils.logging_utils import Log
-from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_mapping
 
-
+from utils.semantic_utils import build_decoder
+from utils.semantic_setting import Semantic_Config
 
 class BackEnd(mp.Process):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.gaussians = None
+        self.gaussians:GaussianModel = None
         self.pipeline_params = None
         self.opt_params = None
         self.background = None
@@ -28,6 +29,7 @@ class BackEnd(mp.Process):
         self.frontend_queue = None
         self.backend_queue = None
         self.live_mode = False
+        self.dataset = None
 
         self.pause = False
         self.device = "cuda"
@@ -42,8 +44,7 @@ class BackEnd(mp.Process):
         self.keyframe_optimizers = None
         
         # CNN Decoder to upsample semantic features
-        self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, LSeg_FEATURES_DIM, kernel_size=1).to(self.device)
-        self.cnn_decoder_optimizer = torch.optim.Adam(self.cnn_decoder.parameters(), lr=0.0001)
+        self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
 
     def set_hyperparams(self):
         self.save_results = self.config["Results"]["save_results"]
@@ -93,58 +94,27 @@ class BackEnd(mp.Process):
     def initialize_map(self, cur_frame_idx, viewpoint):
         for mapping_iteration in range(self.init_itr_num):
             self.iteration_count += 1
-            if mapping_iteration > MAPPING_START_ITR:
-                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
-                (
-                    image,
-                    viewspace_point_tensor,
-                    visibility_filter,
-                    radii,
-                    depth,
-                    opacity,
-                    n_touched,
-                    feature_map,
-                ) = (
-                    render_pkg["render"],
-                    render_pkg["viewspace_points"],
-                    render_pkg["visibility_filter"],
-                    render_pkg["radii"],
-                    render_pkg["depth"],
-                    render_pkg["opacity"],
-                    render_pkg["n_touched"],
-                    render_pkg["feature_map"],
-                )
-                loss_init = get_loss_mapping(self.config, image, depth, viewpoint, opacity, initialization=True)
-
-                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
-                                    mode="bilinear", align_corners=True).squeeze(0))
-                gt_feature = torch.tensor(viewpoint.semantic_feature).cuda()
-                l1_feature = l1_loss(feature_map, gt_feature)
-                if mapping_iteration % 50 == 0:
-                    print("L1 feature loss: ", l1_feature)
-                loss_init += l1_feature
-                loss_init.backward()
-            else:
-                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
-                (
-                    image,
-                    viewspace_point_tensor,
-                    visibility_filter,
-                    radii,
-                    depth,
-                    opacity,
-                    n_touched,
-                ) = (
-                    render_pkg["render"],
-                    render_pkg["viewspace_points"],
-                    render_pkg["visibility_filter"],
-                    render_pkg["radii"],
-                    render_pkg["depth"],
-                    render_pkg["opacity"],
-                    render_pkg["n_touched"],
-                )
-                loss_init = get_loss_mapping(self.config, image, depth, viewpoint, opacity, initialization=True)
-                loss_init.backward()
+            
+            render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
+            (
+                image,
+                viewspace_point_tensor,
+                visibility_filter,
+                radii,
+                depth,
+                opacity,
+                n_touched,
+            ) = (
+                render_pkg["render"],
+                render_pkg["viewspace_points"],
+                render_pkg["visibility_filter"],
+                render_pkg["radii"],
+                render_pkg["depth"],
+                render_pkg["opacity"],
+                render_pkg["n_touched"],
+            )
+            loss_init = get_loss_mapping(self.config, image, depth, viewpoint, opacity, initialization=True)
+            loss_init.backward()
             
             with torch.no_grad():
                 self.gaussians.max_radii2D[visibility_filter] = torch.max(
@@ -170,10 +140,7 @@ class BackEnd(mp.Process):
                 self.cnn_decoder_optimizer.zero_grad()
                 self.gaussians.optimizer.step()
                 self.gaussians.optimizer.zero_grad(set_to_none=True)
-            # print("Initialization iteration time: ", time.time() - start_time)
-        # torch.save(feature_map, "feature_map.pt")
-        # del feature_map, gt_feature
-        # torch.cuda.empty_cache() # free up memory
+
         self.occ_aware_visibility[cur_frame_idx] = (n_touched > 0).long()
         Log("Initialized map")
         torch.cuda.empty_cache()
@@ -206,65 +173,31 @@ class BackEnd(mp.Process):
             keyframes_opt = []
 
             for cam_idx in range(len(current_window)):
-                if cam_idx == 0:
-                    viewpoint = viewpoint_stack[cam_idx]
-                    keyframes_opt.append(viewpoint)
-                    render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
-                    (
-                        image,
-                        viewspace_point_tensor,
-                        visibility_filter,
-                        radii,
-                        depth,
-                        opacity,
-                        n_touched,
-                        feature_map,
-                    ) = (
-                        render_pkg["render"],
-                        render_pkg["viewspace_points"],
-                        render_pkg["visibility_filter"],
-                        render_pkg["radii"],
-                        render_pkg["depth"],
-                        render_pkg["opacity"],
-                        render_pkg["n_touched"],
-                        render_pkg["feature_map"],
-                    )
-                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=(LSeg_IMAGE_SIZE[0], LSeg_IMAGE_SIZE[1]),
-                                        mode="bilinear", align_corners=True).squeeze(0))
-                    gt_feature = torch.tensor(viewpoint.semantic_feature).cuda()
-                    l1_feature = l1_loss(feature_map, gt_feature)
-                    loss_mapping += l1_feature
-                    loss_mapping += get_loss_mapping(self.config, image, depth, viewpoint, opacity)
-                    viewspace_point_tensor_acm.append(viewspace_point_tensor)
-                    visibility_filter_acm.append(visibility_filter)
-                    radii_acm.append(radii)
-                    n_touched_acm.append(n_touched)
-                else:
-                    viewpoint = viewpoint_stack[cam_idx]
-                    keyframes_opt.append(viewpoint)
-                    render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
-                    (
-                        image,
-                        viewspace_point_tensor,
-                        visibility_filter,
-                        radii,
-                        depth,
-                        opacity,
-                        n_touched,
-                    ) = (
-                        render_pkg["render"],
-                        render_pkg["viewspace_points"],
-                        render_pkg["visibility_filter"],
-                        render_pkg["radii"],
-                        render_pkg["depth"],
-                        render_pkg["opacity"],
-                        render_pkg["n_touched"],
-                    )
-                    loss_mapping += get_loss_mapping(self.config, image, depth, viewpoint, opacity)
-                    viewspace_point_tensor_acm.append(viewspace_point_tensor)
-                    visibility_filter_acm.append(visibility_filter)
-                    radii_acm.append(radii)
-                    n_touched_acm.append(n_touched)
+                viewpoint = viewpoint_stack[cam_idx]
+                keyframes_opt.append(viewpoint)
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background)
+                (
+                    image,
+                    viewspace_point_tensor,
+                    visibility_filter,
+                    radii,
+                    depth,
+                    opacity,
+                    n_touched,
+                ) = (
+                    render_pkg["render"],
+                    render_pkg["viewspace_points"],
+                    render_pkg["visibility_filter"],
+                    render_pkg["radii"],
+                    render_pkg["depth"],
+                    render_pkg["opacity"],
+                    render_pkg["n_touched"],
+                )
+                loss_mapping += get_loss_mapping(self.config, image, depth, viewpoint, opacity)
+                viewspace_point_tensor_acm.append(viewspace_point_tensor)
+                visibility_filter_acm.append(visibility_filter)
+                radii_acm.append(radii)
+                n_touched_acm.append(n_touched)
 
             for cam_idx in torch.randperm(len(random_viewpoint_stack))[:2]:
                 viewpoint = random_viewpoint_stack[cam_idx]
@@ -376,8 +309,9 @@ class BackEnd(mp.Process):
                 self.gaussians.optimizer.step()
                 self.gaussians.optimizer.zero_grad(set_to_none=True)
                 self.gaussians.update_learning_rate(self.iteration_count)
-                self.keyframe_optimizers.step()
-                self.keyframe_optimizers.zero_grad(set_to_none=True)
+                if self.keyframe_optimizers is not None:
+                    self.keyframe_optimizers.step()
+                    self.keyframe_optimizers.zero_grad(set_to_none=True)
                 # Pose update
                 for cam_idx in range(min(frames_to_optimize, len(current_window))):
                     viewpoint = viewpoint_stack[cam_idx]
@@ -387,6 +321,46 @@ class BackEnd(mp.Process):
             torch.cuda.empty_cache()
         return gaussian_split
 
+    def map_semantic(self, iters=1, window_size=2):
+        if not Semantic_Config.enable:
+            return
+        
+        if len(self.current_window) == 0:
+            return
+        
+        semantic_window = self.current_window[:window_size]
+        print("Semantic window", semantic_window)
+        viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
+        
+        gt_feature_stack = []
+        for i in range(len(semantic_window)):
+            gt_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
+            gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
+            gt_feature_stack.append(gt_feature)
+        
+        semantic_loss = []
+        for _ in range(iters):
+            loss_semantic = 0
+            for cam_idx in range(len(semantic_window)):
+                viewpoint = viewpoint_stack[cam_idx]
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background,
+                                    flag_semantic=True)
+                feature_map = render_pkg["feature_map"]
+                fmap_size = Semantic_Config.famp_size[Semantic_Config.mode]
+                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), fmap_size,
+                                                            mode="bilinear", align_corners=True).squeeze(0))
+                gt_feature = gt_feature_stack[cam_idx]
+                l1_feature = l1_loss(feature_map, gt_feature)
+                loss_semantic += l1_feature
+                
+            semantic_loss.append(loss_semantic.item())
+            loss_semantic.backward()
+            with torch.no_grad():
+                self.cnn_decoder_optimizer.step()
+                self.cnn_decoder_optimizer.zero_grad()
+                self.gaussians.semantic_optimizer.step()
+                self.gaussians.semantic_optimizer.zero_grad()
+                
     def color_refinement(self):
         Log("Starting color refinement")
 
@@ -430,9 +404,11 @@ class BackEnd(mp.Process):
             keyframes.append((kf_idx, kf.R.clone(), kf.T.clone()))
         if tag is None:
             tag = "sync_backend"
-        decoder_state_dict = self.cnn_decoder.state_dict()
-        state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
-        msg = [tag, clone_obj(self.gaussians), self.occ_aware_visibility, keyframes, state_dict_cpu]
+        state_dict_cpu = None
+        if Semantic_Config.enable:
+            decoder_state_dict = self.cnn_decoder.state_dict()
+            state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
+        msg = [tag, self.gaussians.get_state_dict(), self.occ_aware_visibility, keyframes, state_dict_cpu]
         self.frontend_queue.put(msg)
 
     def run(self):
@@ -472,6 +448,8 @@ class BackEnd(mp.Process):
                     self.viewpoints[cur_frame_idx] = viewpoint
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map, init=True)
                     self.initialize_map(cur_frame_idx, viewpoint)
+                    self.current_window = [cur_frame_idx]
+                    self.map_semantic(iters=Semantic_Config.semantic_init_iter)
                     self.push_to_frontend("init")
 
                 elif data[0] == "keyframe":
@@ -540,8 +518,9 @@ class BackEnd(mp.Process):
 
                     self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)
+                    self.map_semantic(iters=Semantic_Config.semantic_iter, window_size=Semantic_Config.semantic_window)
                     self.push_to_frontend("keyframe")
-                    print("keyframe update")
+                    print("current_window", self.current_window)
                 else:
                     raise Exception("Unprocessed data", data)
         while not self.backend_queue.empty():
