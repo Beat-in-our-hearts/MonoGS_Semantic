@@ -65,6 +65,8 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
         min_map=ape_stats["min"],
         max_map=ape_stats["max"],
     )
+    ax.set_xlim(0, 5)
+    ax.set_ylim(0, 5)
     ax.legend()
     plt.savefig(os.path.join(plot_dir, "evo_2dplot_{}.png".format(str(label))), dpi=90)
     plt.close(fig)
@@ -125,7 +127,7 @@ def benchmark_render_time(frame, gaussians, pipe, background, num_iter=2000, fla
         render(frame, gaussians, pipe, background, flag_semantic=flag_semantic)
     end_time = time.time()
     FPS = num_iter / (end_time - start_time)
-    Log(f"Render FPS: {FPS}", tag="Eval")
+    Log(f"Render FPS: {FPS:.1f}", tag="Eval")
     return FPS
 
 

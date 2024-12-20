@@ -725,7 +725,7 @@ class SLAM_GUI:
                     torch.save(resize_feature_map, "resize_feature_map.pt")
                     self.save_clip = False
                 resize_feature_map = resize_feature_map.permute(1, 2, 0)
-                clip_pca = apply_pca_colormap_return_proj(resize_feature_map)[0].detach().cpu().numpy() # H W C
+                clip_pca = apply_pca_colormap(resize_feature_map)[0].detach().cpu().numpy() # H W C
                 img_clip_pca = (clip_pca*255).astype(np.uint8)
                 # Image.fromarray(img_clip_pca).save("clip_pca.png")
                 img_clip_pca = cv2.resize(img_clip_pca, (render_shape[2], render_shape[1]))
