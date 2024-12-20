@@ -37,8 +37,10 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ape_metric = metrics.APE(pose_relation)
     ape_metric.process_data(data)
     ape_stat = ape_metric.get_statistic(metrics.StatisticsType.rmse)
+    ate_mean = ape_metric.get_statistic(metrics.StatisticsType.mean)
     ape_stats = ape_metric.get_all_statistics()
     Log("RMSE ATE \[cm]", ape_stat*100, tag="Eval")
+    Log("Mean ATE \[cm]", ate_mean*100, tag="Eval")
 
     with open(
         os.path.join(plot_dir, "stats_{}.json".format(str(label))),
@@ -63,7 +65,7 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ax.legend()
     plt.savefig(os.path.join(plot_dir, "evo_2dplot_{}.png".format(str(label))), dpi=90)
 
-    return ape_stat
+    return {'rmse': ape_stat, 'mean': ate_mean}
 
 
 def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False):
@@ -110,7 +112,7 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
         label=label_evo,
         monocular=monocular,
     )
-    wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
+    # wandb.log({"frame_idx": latest_frame_idx, "ate": ate})
     return ate
 
 @torch.no_grad()
