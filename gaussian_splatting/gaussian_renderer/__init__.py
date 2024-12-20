@@ -116,7 +116,6 @@ def render(
     else:
         colors_precomp = override_color
 
-
     if flag_semantic:
         semantic_feature = pc.get_semantic_feature # [ADD Feat]
     else:

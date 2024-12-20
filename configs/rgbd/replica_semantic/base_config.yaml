@@ -9,8 +9,8 @@ Results:
 
 Dataset:
   sensor_type: 'depth'
-  pcd_downsample: 32
-  pcd_downsample_init: 16
+  pcd_downsample: 64
+  pcd_downsample_init: 32
   adaptive_pointsize: True
   point_size: 0.05
   type: 'replica_semantic'
@@ -37,8 +37,8 @@ Training:
   init_gaussian_reset: 500
   init_gaussian_th: 0.005
   init_gaussian_extent: 30
-  tracking_itr_num: 500 # 200
-  mapping_itr_num: 100 # 50
+  tracking_itr_num: 100 # 200
+  mapping_itr_num: 50 # 50
   gaussian_update_every: 150
   gaussian_update_offset: 50
   gaussian_th: 0.7
@@ -55,7 +55,7 @@ Training:
 
   kf_translation: 0.04
   kf_min_translation: 0.01 # 0.02
-  kf_overlap: 0.75
+  kf_overlap: 0.9
   prune_mode: 'slam'
   single_thread: True
   spherical_harmonics: False

@@ -20,7 +20,7 @@ from encoding.nn import SegmentationLosses
 from encoding.utils import batch_pix_accuracy, batch_intersection_union
 
 printcurrent_dir = os.getcwd()
-print(printcurrent_dir)
+# print(printcurrent_dir)
 
 if "lseg_encoder" in printcurrent_dir:
     from data import get_dataset, get_available_datasets

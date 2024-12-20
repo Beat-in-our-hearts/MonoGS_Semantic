@@ -40,6 +40,7 @@ from utils.semantic_utils import build_decoder
 from utils.multiprocessing_utils import FakeQueue
 from utils.semantic_setting import Semantic_Config
 
+from utils.multiprocessing_utils import FakeQueue
 class SLAM:
     def __init__(self, config, save_dir=None):
         self.config = config
@@ -175,8 +176,8 @@ class SLAM:
             self.gui_process.start()
             time.sleep(5)
         else:
-            self.q_main2vis = FakeQueue() 
-            self.q_vis2main = FakeQueue() 
+            self.q_main2vis = FakeQueue()
+            self.q_vis2main = FakeQueue()
 
     def track_update_optimizer(self, viewpoint:Camera = None, BA_flag = False, GBA_flag = False) -> Optimizer:
         """
@@ -343,7 +344,7 @@ class SLAM:
         return initial_depth_numpy
         
         
-    def track_is_keyframe(self, cur_frame_idx, last_keyframe_idx, cur_frame_visibility_filter):
+    def track_is_keyframe(self, cur_frame_idx, last_keyframe_idx, cur_frame_visibility_filter, kf_overlap=0.9):
         # get current viewpoint and last keyframe viewpoint
         cur_viewpoint = self.cameras[cur_frame_idx]
         last_keyframe = self.cameras[last_keyframe_idx]
@@ -358,11 +359,14 @@ class SLAM:
         # Distance check
         check1_dist = dist > self.kf_translation * self.median_depth
         check2_min_dist = dist > self.kf_min_translation * self.median_depth
-        # Common visibility of Gauss points: self.kf_overlap
+        # Common visibility of Gauss points: kf_overlap
         union = torch.logical_or(cur_frame_visibility_filter, self.occ_aware_visibility[last_keyframe_idx]).count_nonzero()
         intersection = torch.logical_and(cur_frame_visibility_filter, self.occ_aware_visibility[last_keyframe_idx]).count_nonzero()
         point_ratio = intersection / union
-        check3_visibility = point_ratio < self.kf_overlap
+        check3_visibility = point_ratio < kf_overlap
+        
+        return ((check3_visibility and check2_min_dist) or check1_dist) and check_time
+    
         if check_full_window:
             return ((check3_visibility and check2_min_dist) or check1_dist) and check_time
         else:
@@ -886,7 +890,7 @@ class SLAM:
                 # ate_output = Eval_frame_pose(viewpoint, monocular=self.monocular)
                 print(f"[{cur_frame_idx}] track time: {time.time()-track_start_time}")
                 
-                self.save_render(cur_frame_idx, viewpoint)
+                # self.save_render(render_pkg, cur_frame_idx)
 
                 current_window_dict = {}
                 current_window_dict[self.current_window[0]] = self.current_window[1:]
@@ -912,6 +916,7 @@ class SLAM:
                         cur_frame_idx,
                         last_keyframe_idx,
                         curr_visibility,
+                        kf_overlap = self.kf_overlap
                     )
                 
                 # # init for 100 frames
