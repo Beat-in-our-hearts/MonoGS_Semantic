@@ -22,3 +22,5 @@ checkpoints
 vis
 test
 *.log
+visualize*
+old*

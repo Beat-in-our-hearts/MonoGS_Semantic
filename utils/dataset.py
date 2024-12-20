@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import trimesh
 from PIL import Image
+import lycon
 
 from gaussian_splatting.utils.graphics_utils import focal2fov
 try:
@@ -258,7 +259,7 @@ class MonocularDataset(BaseDataset):
         color_path = self.color_paths[idx]
         pose = self.poses[idx]
 
-        image = np.array(Image.open(color_path))
+        image = lycon.load(color_path)
         depth = None
 
         if self.disorted:
@@ -266,7 +267,7 @@ class MonocularDataset(BaseDataset):
 
         if self.has_depth:
             depth_path = self.depth_paths[idx]
-            depth = np.array(Image.open(depth_path)) / self.depth_scale
+            depth = cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH) / self.depth_scale
 
         image = (
             torch.from_numpy(image / 255.0)

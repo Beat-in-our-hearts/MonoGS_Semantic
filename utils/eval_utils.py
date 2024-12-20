@@ -39,18 +39,21 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ape_stat = ape_metric.get_statistic(metrics.StatisticsType.rmse)
     ate_mean = ape_metric.get_statistic(metrics.StatisticsType.mean)
     ape_stats = ape_metric.get_all_statistics()
-    Log("RMSE ATE \[cm]", ape_stat*100, tag="Eval")
-    Log("Mean ATE \[cm]", ate_mean*100, tag="Eval")
+    
+    Log(
+        f'RMSE ATE \[cm]: {(ape_stat*100):.3f}, ' + f'Mean ATE \[cm]: {(ate_mean*100):.3f}',
+        tag="Eval",
+    )
 
-    with open(
-        os.path.join(plot_dir, "stats_{}.json".format(str(label))),
-        "w",
-        encoding="utf-8",
-    ) as f:
-        json.dump(ape_stats, f, indent=4)
+    # with open(
+    #     os.path.join(plot_dir, "stats_{}.json".format(str(label))),
+    #     "w",
+    #     encoding="utf-8",
+    # ) as f:
+    #     json.dump(ape_stats, f, indent=4)
 
     plot_mode = evo.tools.plot.PlotMode.xy
-    fig = plt.figure()
+    fig = plt.figure(figsize=(10, 10))
     ax = evo.tools.plot.prepare_axis(fig, plot_mode)
     ax.set_title(f"ATE RMSE: {ape_stat}")
     evo.tools.plot.traj(ax, plot_mode, traj_ref, "--", "gray", "gt")
@@ -64,7 +67,7 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     )
     ax.legend()
     plt.savefig(os.path.join(plot_dir, "evo_2dplot_{}.png".format(str(label))), dpi=90)
-
+    plt.close(fig)
     return {'rmse': ape_stat, 'mean': ate_mean}
 
 
@@ -96,14 +99,14 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
     trj_data["trj_est"] = trj_est
     trj_data["trj_gt"] = trj_gt
 
-    plot_dir = os.path.join(save_dir, "plot")
+    plot_dir = os.path.join(save_dir, "ate_plot")
     mkdir_p(plot_dir)
 
     label_evo = "final" if final else "{:04}".format(iterations)
-    with open(
-        os.path.join(plot_dir, f"trj_{label_evo}.json"), "w", encoding="utf-8"
-    ) as f:
-        json.dump(trj_data, f, indent=4)
+    # with open(
+    #     os.path.join(plot_dir, f"trj_{label_evo}.json"), "w", encoding="utf-8"
+    # ) as f:
+    #     json.dump(trj_data, f, indent=4)
 
     ate = evaluate_evo(
         poses_gt=trj_gt_np,
@@ -191,18 +194,9 @@ def eval_rendering(
     output["mean_depth_l1"] = float(np.mean(depth_l1_array)) if depth_l1 else None
 
     Log(
-        f'mean psnr: {output["mean_psnr"]}, ' + f'ssim: {output["mean_ssim"]}, ' + \
-        f'lpips: {output["mean_lpips"]}, ' + f'depth_l1: {output["mean_depth_l1"]*100}',
+        f'mean psnr: {output["mean_psnr"]:.2f}, ' + f'ssim: {output["mean_ssim"]:.3f}, ' + \
+        f'lpips: {output["mean_lpips"]:.4f}, ' + f'depth_l1: {output["mean_depth_l1"]*100:.3f}',
         tag="Eval",
-    )
-
-    psnr_save_dir = os.path.join(save_dir, "psnr", str(iteration))
-    mkdir_p(psnr_save_dir)
-
-    json.dump(
-        output,
-        open(os.path.join(psnr_save_dir, "final_result.json"), "w", encoding="utf-8"),
-        indent=4,
     )
     return output
 

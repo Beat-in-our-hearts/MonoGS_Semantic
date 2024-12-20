@@ -10,7 +10,7 @@ class Semantic_Config:
     wandb_enable:bool = False
     save_render_enable:bool = False
     
-    gs_init_lr:float = 6.0
+    gs_init_lr:float = 10.0
     
     semantic_window:int = 5
     semantic_init_iter:int = 5
@@ -29,6 +29,15 @@ class Semantic_Config:
         "SAM2": "rgb_feature_sam2"
     }
     render_size = [360, 480]
+    
+    Debug = False
+    log_file = "results/slam_sp.log"
+    delete_save_dir = True
+    Pose_BA_flag = False
+    track_setting = {
+        'kf_only_iou': True,
+        'BA_window': 5,
+    }
 
 
 
