@@ -39,7 +39,7 @@ from utils.multiprocessing_utils import FakeQueue
 from utils.semantic_setting import Semantic_Config
 from utils.semantic_utils import apply_pca_colormap
 
-class SLAM:
+class SLAM_SP:
     def __init__(self, config, save_dir=None):
         self.config = config
         self.save_dir = save_dir
@@ -719,7 +719,7 @@ class SLAM:
     # TODO
     def eval_keyframes(self):
         all_frame_id = list(range(self.keyframe_indices[-1]))
-        ate_reslut = eval_ate(
+        ate_result = eval_ate(
                 self.cameras,
                 all_frame_id,
                 self.save_dir,
@@ -741,8 +741,8 @@ class SLAM:
         kf_idx = self.keyframe_indices[-1]
         kf_output = {
             "frame_idx": kf_idx,
-            "rmse_ate": ate_reslut["rmse"],
-            "mean_ate": ate_reslut["mean"],
+            "rmse_ate": ate_result["rmse"],
+            "mean_ate": ate_result["mean"],
             "psnr": rendering_result["mean_psnr"],
             "ssim": rendering_result["mean_ssim"],
             "lpips": rendering_result["mean_lpips"],
@@ -865,6 +865,7 @@ class SLAM:
         if not self.save_results:
             return
         ckpts_dir = os.path.join(self.save_dir, 'ckpts')
+        os.makedirs(ckpts_dir, exist_ok=True)
         self.gaussians.save_ply(path=os.path.join(ckpts_dir, f"gaussian_kf_{text}.ply"))
         
         if Semantic_Config.enable:
@@ -954,6 +955,7 @@ class SLAM:
                     self.tim_end = time.time()
                     self.save_state_dict('final')
                     self.eval()
+                    break
                 elif len(self.keyframe_indices) % self.save_trj_kf_intv == 0 \
                         and len(self.keyframe_indices) and self.keyframe_indices[-1] == cur_frame_idx-1:
                     self.save_state_dict(f"{self.keyframe_indices[-1]:04d}")
@@ -985,8 +987,7 @@ class SLAM:
                 # tracking
                 track_start_time = time.time()
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
-                # ate_output = Eval_frame_pose(viewpoint, monocular=self.monocular)
-                debug(f"[{cur_frame_idx}] track time: {time.time()-track_start_time}")
+                debug(f"[{cur_frame_idx:04d}] track time: {time.time()-track_start_time}")
                 
                 self.save_render(cur_frame_idx, viewpoint)
                 # update GUI
@@ -1115,19 +1116,17 @@ if __name__ == "__main__":
     if config["Results"]["save_results"]:
         if args.save_path:
             save_dir = args.save_path
-            os.makedirs(save_dir, exist_ok=True)
             config["Results"]["save_dir"] = save_dir
         elif Semantic_Config.save_root_dir is not None:
             scene_name = config["Dataset"]["dataset_path"].split("/")[-1] 
             save_dir = os.path.join(Semantic_Config.save_root_dir, scene_name)
-            os.makedirs(save_dir, exist_ok=True)
             config["Results"]["save_dir"] = save_dir
         else: # auto set save path
-            if config["Results"]["save_results"]:
-                path = config["Dataset"]["dataset_path"].split("/")
-                save_dir = os.path.join(config["Results"]["save_dir"], path[-2] + "_" + path[-1])
-                config["Results"]["save_dir"] = save_dir
-                os.makedirs(save_dir, exist_ok=True)
+            path = config["Dataset"]["dataset_path"].split("/")
+            save_dir = os.path.join(config["Results"]["save_dir"], path[-2] + "_" + path[-1])
+            config["Results"]["save_dir"] = save_dir
+        
+        os.makedirs(save_dir, exist_ok=True)
         with open(os.path.join(save_dir, "config.yml"), "w") as file:
             documents = yaml.dump(config, file)
         Log("saving results in " + save_dir)
@@ -1143,10 +1142,13 @@ if __name__ == "__main__":
 
     # run
     start_time = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    info(f"Time: {start_time}")
-    slam = SLAM(config, save_dir=save_dir)
-    slam.run(resume=args.resume, eval= args.eval)
+    Log(f"Time: {start_time}")
+    slam = SLAM_SP(config, save_dir=save_dir)
+    slam.run(resume=args.resume, eval=args.eval)
     slam.close()
+    wandb.finish()
+    # All done
+    Log("Done.")
 
 # python slam_single_thread.py --config configs/rgbd/replica_v2/room2.yaml --save_path ./results/replica/room2/sam2_test
 # python slam_single_thread.py --config configs/rgbd/replica_v2/room2.yaml --save_path ./results/replica/room2/sam2_64
