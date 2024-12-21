@@ -27,6 +27,7 @@ from utils.slam_utils import get_loss_tracking, get_median_depth
 from utils.semantic_utils import build_decoder
 from utils.semantic_setting import Semantic_Config
 from utils.semantic_utils import apply_pca_colormap
+from imgviz import label_colormap
 
 class FrontEnd(mp.Process):
     def __init__(self, config):
@@ -60,7 +61,8 @@ class FrontEnd(mp.Process):
         self.pause = False
         
         # CNN Decoder to upsample semantic features
-        self.cnn_decoder, _ = build_decoder(mode='eval')
+        if Semantic_Config.mode == "SAM2":
+            self.cnn_decoder, _ = build_decoder(mode='eval')
 
     def set_hyperparams(self):
         self.save_dir = self.config["Results"]["save_dir"]
@@ -357,7 +359,7 @@ class FrontEnd(mp.Process):
         keyframes = data[3]
         received_state_dict = data[4]
         
-        if received_state_dict is not None:
+        if received_state_dict is not None and self.cnn_decoder is not None:
             self.cnn_decoder.load_state_dict({key: value.cuda() for key, value in received_state_dict.items()})
             self.semantic_init = True
         self.occ_aware_visibility = occ_aware_visibility
@@ -429,19 +431,29 @@ class FrontEnd(mp.Process):
         render_depth_path = os.path.join(depth_root_dir, f"depth_{cur_frame_idx:04d}.png")
         cv2.imwrite(render_depth_path, render_depth)
         
+
         # TODO
         if Semantic_Config.enable:
-            feature_map = render_pkg["feature_map"]
-            render_shape = feature_map.shape
-            resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
-                                                size= Semantic_Config.render_size,
-                                                mode="bilinear", align_corners=True).squeeze(0))
-            
-            sam2_pca = apply_pca_colormap(resize_feature_map.permute(1, 2, 0)).detach().cpu().numpy() # H W C
-            img_sam2_pca = (sam2_pca*255).astype(np.uint8)
-            img_sam2_pca = cv2.resize(img_sam2_pca, (render_shape[2], render_shape[1]))
-            render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
-            cv2.imwrite(render_semantic_path, img_sam2_pca)
+            if Semantic_Config.mode == "SAM2":
+                feature_map = render_pkg["feature_map"]
+                render_shape = feature_map.shape
+                resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                    size= Semantic_Config.render_size,
+                                                    mode="bilinear", align_corners=True).squeeze(0))
+                
+                sam2_pca = apply_pca_colormap(resize_feature_map.permute(1, 2, 0)).detach().cpu().numpy() # H W C
+                img_sam2_pca = (sam2_pca*255).astype(np.uint8)
+                img_sam2_pca = cv2.resize(img_sam2_pca, (render_shape[2], render_shape[1]))
+                render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
+                cv2.imwrite(render_semantic_path, img_sam2_pca)
+            elif Semantic_Config.mode == "GT_Label":
+                feature_map = render_pkg["feature_map"]
+                pred_label = torch.argmax(feature_map, dim=0).detach().cpu().numpy()
+                img_label = label_colormap()[pred_label]
+                render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
+                cv2.imwrite(render_semantic_path, img_label)
+            else:
+                raise NotImplementedError
         debug(f"Saved render: {cur_frame_idx}")
     
     def save_state_dict(self, text):
@@ -452,8 +464,9 @@ class FrontEnd(mp.Process):
         self.gaussians.save_ply(path=os.path.join(ckpts_dir, f"gaussian_kf_{text}.ply"))
         
         if Semantic_Config.enable:
-            decoder_state_dict = self.cnn_decoder.state_dict()
-            torch.save(decoder_state_dict, os.path.join(ckpts_dir,  f"decoder_{text}.pth"))
+            if Semantic_Config.mode == "SAM2":
+                decoder_state_dict = self.cnn_decoder.state_dict()
+                torch.save(decoder_state_dict, os.path.join(ckpts_dir,  f"decoder_{text}.pth"))
         
         pose_dict = {}
         for idx, viewpoint in self.cameras.items():
@@ -507,9 +520,7 @@ class FrontEnd(mp.Process):
                             monocular=self.monocular,
                         )
                         
-                        save_gaussians(
-                            self.gaussians, self.save_dir, "final", final=True
-                        )
+                        self.save_state_dict("final")
                     break
 
                 if self.requested_init:
