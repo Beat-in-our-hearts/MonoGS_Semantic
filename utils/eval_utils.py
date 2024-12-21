@@ -65,8 +65,6 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
         min_map=ape_stats["min"],
         max_map=ape_stats["max"],
     )
-    ax.set_xlim(0, 5)
-    ax.set_ylim(0, 5)
     ax.legend()
     plt.savefig(os.path.join(plot_dir, "evo_2dplot_{}.png".format(str(label))), dpi=90)
     plt.close(fig)
