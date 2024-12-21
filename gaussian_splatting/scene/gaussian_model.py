@@ -807,3 +807,36 @@ class GaussianModel:
             viewspace_point_tensor.grad[update_filter, :2], dim=-1, keepdim=True
         )
         self.denom[update_filter] += 1
+
+    def get_state_dict(self):
+        state_dict_cpu = {
+            'xyz': self._xyz.detach().cpu().numpy(),
+            'features_dc': self._features_dc.detach().cpu().numpy(),
+            'features_rest': self._features_rest.detach().cpu().numpy(),
+            'scaling': self._scaling.detach().cpu().numpy(),
+            'rotation': self._rotation.detach().cpu().numpy(),
+            'opacity': self._opacity.detach().cpu().numpy(),
+            'semantic_feature': self._semantic_feature.detach().cpu().numpy(), # [ADD Feat]
+        }
+        return state_dict_cpu
+    
+    def load_state_dict(self, state_dict_cpu):
+        self._xyz = nn.Parameter(torch.tensor(state_dict_cpu['xyz'], device='cuda')
+                                 .requires_grad_(False))
+        self._features_dc = nn.Parameter(torch.tensor(state_dict_cpu['features_dc'], device='cuda')
+                                        .requires_grad_(False))
+        self._features_rest = nn.Parameter(torch.tensor(state_dict_cpu['features_rest'], device='cuda')
+                                            .requires_grad_(False))
+        self._scaling = nn.Parameter(torch.tensor(state_dict_cpu['scaling'], device='cuda')
+                                        .requires_grad_(False))
+        self._rotation = nn.Parameter(torch.tensor(state_dict_cpu['rotation'], device='cuda')
+                                        .requires_grad_(False))
+        self._opacity = nn.Parameter(torch.tensor(state_dict_cpu['opacity'], device='cuda')
+                                        .requires_grad_(False))
+        self._semantic_feature = nn.Parameter(torch.tensor(state_dict_cpu['semantic_feature'], device='cuda')
+                                        .requires_grad_(False)) # [ADD Feat]
+        self.max_radii2D = torch.zeros((self._xyz.shape[0]), device="cuda")
+        self.unique_kfIDs = torch.zeros((self._xyz.shape[0]))
+        self.n_obs = torch.zeros((self._xyz.shape[0]), device="cpu").int()
+        self.xyz_gradient_accum = torch.zeros((self._xyz.shape[0], 1), device="cuda")
+        

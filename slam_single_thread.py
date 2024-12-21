@@ -161,7 +161,11 @@ class SLAM:
         """
         opt_params = []
         if BA_flag:
-            for cam_dix in range(len(self.current_window)):
+            if GBA_flag and len(self.current_window) == self.window_size:
+                frames_to_optimize = self.window_size - 1
+            else:
+                frames_to_optimize = self.config["Training"]["pose_window"]
+            for cam_dix in range(min(frames_to_optimize, len(self.current_window))):
                 if self.current_window[cam_dix] == 0: # skip the first frame
                     continue
                 old_viewpoint = self.cameras[self.current_window[cam_dix]]
@@ -180,50 +184,11 @@ class SLAM:
                     }
                 )
                 opt_params.append(
-                {
-                    "params": [old_viewpoint.exposure_a],
-                    "lr": 0.01,
-                    "name": "exposure_a_{}".format(old_viewpoint.uid),
-                }
-                )
-                opt_params.append(
                     {
-                        "params": [old_viewpoint.exposure_b],
+                        "params": [old_viewpoint.exposure_a],
                         "lr": 0.01,
-                        "name": "exposure_b_{}".format(old_viewpoint.uid),
+                        "name": "exposure_a_{}".format(old_viewpoint.uid),
                     }
-                )
-        elif GBA_flag:
-            # GBA_MAX = 200
-            # cur_frame_num = self.keyframe_indices[-1]
-            # if  cur_frame_num < GBA_MAX:
-            #     samples = range(cur_frame_num)
-            # else:
-            #     samples = random.sample(range(cur_frame_num), GBA_MAX)
-            for cam_dix in range(len(self.keyframe_indices)):
-                if self.keyframe_indices[cam_dix] == 0: # skip the first frame
-                    continue
-                old_viewpoint = self.cameras[self.keyframe_indices[cam_dix]]
-                opt_params.append(
-                    {
-                        "params": [old_viewpoint.cam_rot_delta],
-                        "lr": self.config["Training"]["lr"]["cam_rot_delta"] * 0.5,
-                        "name": "rot_{}".format(old_viewpoint.uid),
-                    }
-                )
-                opt_params.append(
-                    {
-                        "params": [old_viewpoint.cam_trans_delta],
-                        "lr": self.config["Training"]["lr"]["cam_trans_delta"] * 0.5,
-                        "name": "trans_{}".format(old_viewpoint.uid),
-                    }
-                )
-                opt_params.append(
-                {
-                    "params": [old_viewpoint.exposure_a],
-                    "lr": 0.01,
-                    "name": "exposure_a_{}".format(old_viewpoint.uid),
-                }
                 )
                 opt_params.append(
                     {
@@ -531,7 +496,7 @@ class SLAM:
         random_viewpoint_stack = [self.cameras[cam_idx] for cam_idx in self.keyframe_indices if cam_idx not in self.current_window]
         random_update_num = 2
         # Local BA optimizer
-        pose_optimizer = self.track_update_optimizer(BA_flag=True)
+        pose_optimizer = self.track_update_optimizer(BA_flag=Semantic_Config.Pose_BA_flag)
         gt_feature_stack = []
         if Semantic_Config.enable:
             for i in range(len(self.current_window)):
@@ -663,11 +628,8 @@ class SLAM:
                 
                 if Semantic_Config.Pose_BA_flag:
                     # TODO pose_window BA_window 
-                    if len(self.current_window) > Semantic_Config.track_setting["BA_window"]:
-                        BA_len = Semantic_Config.track_setting["BA_window"]
-                    else:
-                        BA_len = len(self.current_window)
-                    for cam_dix in range(BA_len):
+                    frames_to_optimize = self.config["Training"]["pose_window"]
+                    for cam_dix in range(min(frames_to_optimize, len(self.current_window))):
                         if self.current_window[cam_dix] != 0:                        
                             update_pose(self.cameras[self.current_window[cam_dix]]) 
 
