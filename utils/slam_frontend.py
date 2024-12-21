@@ -14,7 +14,7 @@ from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWor
 from gui import gui_utils
 from utils.camera_utils import Camera
 from utils.eval_utils import eval_ate, save_gaussians
-from utils.logging_utils import Log
+from utils.logging_utils import Log, debug
 from utils.camera_utils import Camera
 from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
@@ -223,7 +223,7 @@ class FrontEnd(mp.Process):
             #     )
             if converged:
                 break
-        print(f"Track Iteration: {tracking_itr}")
+        debug(f"Track Iteration: {tracking_itr}")
         self.median_depth = get_median_depth(depth, opacity)
         return render_pkg
     
@@ -425,18 +425,18 @@ class FrontEnd(mp.Process):
                     break
 
                 if self.requested_init:
-                    time.sleep(0.1)
-                    print('waiting for init')
+                    time.sleep(0.5)
+                    debug('waiting for init')
                     continue
 
                 if self.single_thread and self.requested_keyframe > 0:
                     time.sleep(0.1)
-                    print('sp: waiting for keyframe')
+                    debug('sp: waiting for keyframe')
                     continue
 
                 if not self.initialized and self.requested_keyframe > 0:
                     time.sleep(0.1)
-                    print('init: waiting for keyframe')
+                    debug('init: waiting for keyframe')
                     continue
 
                 viewpoint = Camera.init_from_dataset(
@@ -459,7 +459,7 @@ class FrontEnd(mp.Process):
                 # Tracking
                 start_time = time.time()
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
-                print("Tracking time: ", time.time() - start_time)
+                debug(f"Tracking time: {time.time() - start_time}")
 
                 self.update_gui(viewpoint)
 
