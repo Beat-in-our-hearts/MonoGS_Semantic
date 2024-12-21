@@ -265,7 +265,7 @@ if __name__ == "__main__":
             os.makedirs(save_dir, exist_ok=True)
 
     # run
-    start_time = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    start_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     Log(f"Time: {start_time}")
     
     slam = SLAM(config, save_dir=save_dir)
