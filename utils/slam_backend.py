@@ -11,7 +11,7 @@ from tqdm import tqdm
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.scene.gaussian_model import GaussianModel
 from gaussian_splatting.utils.loss_utils import l1_loss, ssim
-from utils.logging_utils import Log
+from utils.logging_utils import Log, debug, info
 from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_mapping
 
@@ -41,6 +41,8 @@ class BackEnd(mp.Process):
         self.last_sent = 0
         self.occ_aware_visibility = {}
         self.viewpoints:Dict[int, Camera] = dict()
+        if Semantic_Config.preload_semantic:
+            self.gt_semantic_stack:Dict[int, torch.Tensor] = dict()
         self.current_window = []
         self.initialized = not self.monocular
         self.keyframe_optimizers = None
@@ -240,7 +242,6 @@ class BackEnd(mp.Process):
 
         for _ in range(iters):
             self.iteration_count += 1
-            self.last_sent += 1
 
             loss_mapping = 0
             viewspace_point_tensor_acm = []
@@ -407,15 +408,18 @@ class BackEnd(mp.Process):
             return
         
         semantic_window = self.current_window[:window_size]
-        print("Semantic window", semantic_window)
         viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
         
         gt_feature_stack = []
-        for i in range(len(semantic_window)):
-            gt_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
-            gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
-            gt_feature_stack.append(gt_feature)
-        
+        if Semantic_Config.preload_semantic:
+            for i in range(len(semantic_window)):
+                gt_feature_stack.append(self.gt_semantic_stack[semantic_window[i]])
+        else:
+            for i in range(len(semantic_window)):
+                gt_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
+                gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
+                gt_feature_stack.append(gt_feature)
+    
         semantic_loss = []
         for _ in range(iters):
             loss_semantic = 0
@@ -475,7 +479,6 @@ class BackEnd(mp.Process):
         Log("Map refinement done")
 
     def push_to_frontend(self, tag=None):
-        self.last_sent = 0
         keyframes = []
         for kf_idx in self.current_window:
             kf = self.viewpoints[kf_idx]
@@ -501,11 +504,11 @@ class BackEnd(mp.Process):
                 if self.single_thread:
                     time.sleep(0.01)
                     continue
+                self.last_sent += 1
                 self.map(self.current_window)
-                if self.last_sent >= 10:
+                if self.last_sent % 10 == 0:
                     self.map(self.current_window, prune=True, iters=10)
-                    # self.push_to_frontend()
-                    print("empty map update")
+                    debug(f"idle mapping")
             else:
                 data = self.backend_queue.get()
                 if data[0] == "stop":
@@ -524,6 +527,10 @@ class BackEnd(mp.Process):
                     Log("Resetting the system")
                     self.reset()
                     self.viewpoints[cur_frame_idx] = viewpoint
+                    if Semantic_Config.preload_semantic:
+                        gt_semantic_path = self.dataset.get_pred_semantic(cur_frame_idx)
+                        gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
+                        self.gt_semantic_stack[cur_frame_idx] = gt_feature
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map, init=True)
                     self.initialize_map(cur_frame_idx, viewpoint)
                     self.current_window = [cur_frame_idx]
@@ -532,13 +539,16 @@ class BackEnd(mp.Process):
 
                 elif data[0] == "keyframe":
                     map_start_time = time.time()
-                    print("start mapping")
                     cur_frame_idx = data[1]
                     viewpoint = data[2]
                     current_window = data[3]
                     depth_map = data[4]
 
                     self.viewpoints[cur_frame_idx] = viewpoint
+                    if Semantic_Config.preload_semantic:
+                        gt_semantic_path = self.dataset.get_pred_semantic(cur_frame_idx)
+                        gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
+                        self.gt_semantic_stack[cur_frame_idx] = gt_feature
                     self.current_window = current_window
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
 
@@ -559,8 +569,7 @@ class BackEnd(mp.Process):
                     self.map(self.current_window, prune=True)
                     self.map_semantic(iters=Semantic_Config.semantic_iter, window_size=Semantic_Config.semantic_window)
                     self.push_to_frontend("keyframe")
-                    print("current_window", self.current_window)
-                    print("mapping time", time.time() - map_start_time)
+                    info(f"[{cur_frame_idx:04d}] map time: {time.time()-map_start_time:.1f} keyframes_num: {len(self.viewpoints)} map_window:{self.current_window}")
                 else:
                     raise Exception("Unprocessed data", data)
         while not self.backend_queue.empty():
