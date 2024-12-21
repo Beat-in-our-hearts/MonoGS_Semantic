@@ -66,7 +66,7 @@ class FrontEnd(mp.Process):
         self.tracking_itr_num = self.config["Training"]["tracking_itr_num"]
         self.kf_interval = self.config["Training"]["kf_interval"]
         self.window_size = self.config["Training"]["window_size"]
-        self.single_thread = self.config["Training"]["single_thread"]
+        self.single_thread = self.config["Dataset"]["single_thread"]
     
     # def set_feature_extractor(self):
     #     self.feature_extractor = LSeg_FeatureExtractor(debug=True)
@@ -223,6 +223,7 @@ class FrontEnd(mp.Process):
             #     )
             if converged:
                 break
+        print(f"Track Iteration: {tracking_itr}")
         self.median_depth = get_median_depth(depth, opacity)
         return render_pkg
     
@@ -424,15 +425,18 @@ class FrontEnd(mp.Process):
                     break
 
                 if self.requested_init:
-                    time.sleep(0.01)
+                    time.sleep(0.1)
+                    print('waiting for init')
                     continue
 
                 if self.single_thread and self.requested_keyframe > 0:
-                    time.sleep(0.01)
+                    time.sleep(0.1)
+                    print('sp: waiting for keyframe')
                     continue
 
                 if not self.initialized and self.requested_keyframe > 0:
-                    time.sleep(0.01)
+                    time.sleep(0.1)
+                    print('init: waiting for keyframe')
                     continue
 
                 viewpoint = Camera.init_from_dataset(
