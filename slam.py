@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import time
 from argparse import ArgumentParser
@@ -22,6 +23,7 @@ from utils.slam_backend import BackEnd
 from utils.slam_frontend import FrontEnd
 
 from utils.semantic_setting import Semantic_Config
+from utils.wandb_utils import wandb_init
 
 class SLAM:
     def __init__(self, config, save_dir=None):
@@ -208,19 +210,20 @@ if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Training script parameters")
     parser.add_argument("--config", type=str)
+    parser.add_argument("--save_path", type=str, default=None)
     parser.add_argument("--eval", action="store_true")
-
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--headless", action="store_true")
+    
     args = parser.parse_args(sys.argv[1:])
-
     mp.set_start_method("spawn")
 
     with open(args.config, "r") as yml:
         config = yaml.safe_load(yml)
-
     config = load_config(args.config)
-    save_dir = None
-
-    if args.eval:
+    
+    # headless eval 
+    if args.headless:
         Log("Running MonoGS in Evaluation Mode")
         Log("Following config will be overriden")
         Log("\tsave_results=True")
@@ -232,31 +235,40 @@ if __name__ == "__main__":
         Log("\tuse_wandb=True")
         config["Results"]["use_wandb"] = True
 
+    # set save dir
+    save_dir = None
     if config["Results"]["save_results"]:
-        mkdir_p(config["Results"]["save_dir"])
-        current_datetime = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        path = config["Dataset"]["dataset_path"].split("/")
-        save_dir = os.path.join(
-            config["Results"]["save_dir"], path[-3] + "_" + path[-2], current_datetime
-        )
-        tmp = args.config
-        tmp = tmp.split(".")[0]
-        config["Results"]["save_dir"] = save_dir
-        mkdir_p(save_dir)
+        if args.save_path:
+            save_dir = args.save_path
+            config["Results"]["save_dir"] = save_dir
+        elif Semantic_Config.save_root_dir is not None:
+            scene_name = config["Dataset"]["dataset_path"].split("/")[-1] 
+            save_dir = os.path.join(Semantic_Config.save_root_dir, scene_name)
+            config["Results"]["save_dir"] = save_dir
+        else: # auto set save path
+            path = config["Dataset"]["dataset_path"].split("/")
+            save_dir = os.path.join(config["Results"]["save_dir"], path[-2] + "_" + path[-1])
+            config["Results"]["save_dir"] = save_dir
+            
+        os.makedirs(save_dir, exist_ok=True)
         with open(os.path.join(save_dir, "config.yml"), "w") as file:
             documents = yaml.dump(config, file)
         Log("saving results in " + save_dir)
-        run = wandb.init(
-            project="MonoGS",
-            name=f"{tmp}_{current_datetime}",
-            config=config,
-            mode=None if config["Results"]["use_wandb"] else "disabled",
-        )
-        wandb.define_metric("frame_idx")
-        wandb.define_metric("ate*", step_metric="frame_idx")
+        
+        # set wandb
+        wandb_name = args.config.split(".")[0]
+        wandb_init(config, save_dir, wandb_name, args.resume)
+        
+        if Semantic_Config.delete_save_dir:
+            Log("Deleting save_dir")
+            shutil.rmtree(save_dir)
+            os.makedirs(save_dir, exist_ok=True)
 
+    # run
+    start_time = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    Log(f"Time: {start_time}")
+    
     slam = SLAM(config, save_dir=save_dir)
-
     slam.run()
     wandb.finish()
 

@@ -1,5 +1,8 @@
+import json
+import os
 import time
 from typing import Dict, List, Union
+import cv2
 import numpy as np
 import torch
 import torch.nn as nn
@@ -7,13 +10,14 @@ import torch.multiprocessing as mp
 import torch.nn.functional as F
 
 from PIL import Image
+import wandb
 
 from gaussian_splatting.gaussian_renderer import render
 from gaussian_splatting.scene.gaussian_model import GaussianModel
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from gui import gui_utils
 from utils.camera_utils import Camera
-from utils.eval_utils import eval_ate, save_gaussians
+from utils.eval_utils import eval_ate, eval_rendering
 from utils.logging_utils import Log, debug
 from utils.camera_utils import Camera
 from utils.multiprocessing_utils import clone_obj
@@ -22,6 +26,7 @@ from utils.slam_utils import get_loss_tracking, get_median_depth
 
 from utils.semantic_utils import build_decoder
 from utils.semantic_setting import Semantic_Config
+from utils.semantic_utils import apply_pca_colormap
 
 class FrontEnd(mp.Process):
     def __init__(self, config):
@@ -67,6 +72,8 @@ class FrontEnd(mp.Process):
         self.kf_interval = self.config["Training"]["kf_interval"]
         self.window_size = self.config["Training"]["window_size"]
         self.single_thread = self.config["Dataset"]["single_thread"]
+        self.eval_rendering = self.config["Results"]["eval_rendering"]
+        self.depth_scale = self.config["Dataset"]["Calibration"]["depth_scale"]
     
     # def set_feature_extractor(self):
     #     self.feature_extractor = LSeg_FeatureExtractor(debug=True)
@@ -377,7 +384,77 @@ class FrontEnd(mp.Process):
                         decoder_ckpts=decoder_state_dict_cpu
                     )
                 )
+    
+    def save_render(self, cur_frame_idx, viewpoint:Camera):
+        if not self.eval_rendering:
+            return 
+        
+        render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background,
+                            flag_semantic=Semantic_Config.enable) 
+        
+        render_depth = render_pkg["depth"][0]
+        rgb_root_dir = os.path.join(self.save_dir, "render", 'rgb')
+        depth_root_dir = os.path.join(self.save_dir, "render", 'depth')
+        semantic_root_dir = os.path.join(self.save_dir, "render", 'semantic')
+        os.makedirs(rgb_root_dir, exist_ok=True)
+        os.makedirs(depth_root_dir, exist_ok=True)
+        if Semantic_Config.enable:
+            os.makedirs(semantic_root_dir, exist_ok=True)
+        
+        # cv2 save image 
+        render_rgb = (
+                (torch.clamp(render_pkg["render"], min=0, max=1.0) * 255)
+                .byte()
+                .permute(1, 2, 0)
+                .contiguous()
+                .cpu()
+                .numpy()
+            )
+        render_rgb = render_rgb[..., ::-1]
+        
+        render_rgb_path = os.path.join(rgb_root_dir, f"rgb_{cur_frame_idx:04d}.png")
+        cv2.imwrite(render_rgb_path, render_rgb)
+        
+        render_depth = (render_depth * self.depth_scale).cpu().detach().numpy().astype(np.uint16)
+        render_depth_path = os.path.join(depth_root_dir, f"depth_{cur_frame_idx:04d}.png")
+        cv2.imwrite(render_depth_path, render_depth)
+        
+        # TODO
+        if Semantic_Config.enable:
+            feature_map = render_pkg["feature_map"]
+            render_shape = feature_map.shape
+            resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                size= Semantic_Config.render_size,
+                                                mode="bilinear", align_corners=True).squeeze(0))
             
+            sam2_pca = apply_pca_colormap(resize_feature_map.permute(1, 2, 0)).detach().cpu().numpy() # H W C
+            img_sam2_pca = (sam2_pca*255).astype(np.uint8)
+            img_sam2_pca = cv2.resize(img_sam2_pca, (render_shape[2], render_shape[1]))
+            render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
+            cv2.imwrite(render_semantic_path, img_sam2_pca)
+        debug(f"Saved render: {cur_frame_idx}")
+    
+    def save_state_dict(self, text):
+        if not self.save_results:
+            return
+        ckpts_dir = os.path.join(self.save_dir, 'ckpts')
+        os.makedirs(ckpts_dir, exist_ok=True)
+        self.gaussians.save_ply(path=os.path.join(ckpts_dir, f"gaussian_kf_{text}.ply"))
+        
+        if Semantic_Config.enable:
+            decoder_state_dict = self.cnn_decoder.state_dict()
+            torch.save(decoder_state_dict, os.path.join(ckpts_dir,  f"decoder_{text}.pth"))
+        
+        pose_dict = {}
+        for idx, viewpoint in self.cameras.items():
+            pose = {"R": viewpoint.R.cpu().numpy().tolist(), "T": viewpoint.T.cpu().numpy().tolist()}
+            pose_dict[idx] = pose
+        
+        resume_info = {"current_window": self.current_window, "keyframe_indices": self.kf_indices, "pose_dict": pose_dict}
+        with open(os.path.join(ckpts_dir, f"resume_info_{text}.json"), 'w', encoding='utf-8') as f:
+            json.dump(resume_info, f, indent=4)
+            
+
     def run(self):
         cur_frame_idx = 0
         projection_matrix = getProjectionMatrix2(
@@ -419,6 +496,7 @@ class FrontEnd(mp.Process):
                             final=True,
                             monocular=self.monocular,
                         )
+                        
                         save_gaussians(
                             self.gaussians, self.save_dir, "final", final=True
                         )
@@ -457,10 +535,13 @@ class FrontEnd(mp.Process):
                 )
 
                 # Tracking
-                start_time = time.time()
+                track_start_time = time.time()
                 render_pkg = self.tracking(cur_frame_idx, viewpoint)
-                debug(f"Tracking time: {time.time() - start_time}")
+                debug(f"[{cur_frame_idx:04d}] track time: {time.time()-track_start_time}")
 
+                self.save_render(cur_frame_idx, viewpoint)
+                
+                # update GUI
                 self.update_gui(viewpoint)
 
                 if self.requested_keyframe > 0:
@@ -533,20 +614,52 @@ class FrontEnd(mp.Process):
                     and create_kf
                     and len(self.kf_indices) % self.save_trj_kf_intv == 0
                 ):
+                    self.save_state_dict(f"{self.kf_indices[-1]:04d}")
                     Log("Evaluating ATE at frame: ", cur_frame_idx)
-                    eval_ate(
+                    all_frame_id = list(range(self.kf_indices[-1]))
+                    ate_result = eval_ate(
                         self.cameras,
-                        self.kf_indices,
+                        all_frame_id,
                         self.save_dir,
                         cur_frame_idx,
                         monocular=self.monocular,
                     )
+                    rendering_result = eval_rendering(
+                        self.cameras,
+                        self.gaussians,
+                        self.dataset,
+                        self.save_dir,
+                        self.pipeline_params,
+                        self.background,
+                        kf_indices=self.kf_indices,
+                        iteration="before_opt",
+                        depth_l1=not self.monocular
+                    )
+                    kf_idx = self.kf_indices[-1]
+                    kf_output = {
+                        "frame_idx": kf_idx,
+                        "rmse_ate": ate_result["rmse"],
+                        "mean_ate": ate_result["mean"],
+                        "psnr": rendering_result["mean_psnr"],
+                        "ssim": rendering_result["mean_ssim"],
+                        "lpips": rendering_result["mean_lpips"],
+                        "depth_l1": rendering_result["mean_depth_l1"]
+                    }
+                    wandb.log(kf_output)
+                    if self.save_results:
+                        metric_dir = os.path.join(self.save_dir, "metric")
+                        os.makedirs(metric_dir, exist_ok=True)
+                        with open(os.path.join(metric_dir, f"eval_kf_{kf_idx:04d}.json"), 'w', encoding='utf-8') as f:
+                            json.dump(kf_output, f, indent=4)          
+                    
                 toc.record()
-                torch.cuda.synchronize()
+                if Semantic_Config.synchronize:
+                    torch.cuda.synchronize()
                 if create_kf:
                     # throttle at 3fps when keyframe is added
                     duration = tic.elapsed_time(toc)
-                    time.sleep(max(0.01, 1.0 / 3.0 - duration / 1000))
+                    sleep_time = 1.0 / 3.0 - duration / 1000
+                    time.sleep(max(0.01, sleep_time))
             else:
                 data = self.frontend_queue.get()
                 if data[0] == "sync_backend":
