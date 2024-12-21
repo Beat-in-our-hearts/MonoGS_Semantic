@@ -422,10 +422,9 @@ class FrontEnd(mp.Process):
                 .cpu()
                 .numpy()
             )
-        render_rgb = render_rgb[..., ::-1]
         
         render_rgb_path = os.path.join(rgb_root_dir, f"rgb_{cur_frame_idx:04d}.png")
-        cv2.imwrite(render_rgb_path, render_rgb)
+        cv2.imwrite(render_rgb_path, cv2.cvtColor(render_rgb, cv2.COLOR_RGB2BGR))
         
         render_depth = (render_depth * self.depth_scale).cpu().detach().numpy().astype(np.uint16)
         render_depth_path = os.path.join(depth_root_dir, f"depth_{cur_frame_idx:04d}.png")
@@ -451,7 +450,7 @@ class FrontEnd(mp.Process):
                 pred_label = torch.argmax(feature_map, dim=0).detach().cpu().numpy()
                 img_label = label_colormap()[pred_label]
                 render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
-                cv2.imwrite(render_semantic_path, img_label)
+                cv2.imwrite(render_semantic_path, cv2.cvtColor(img_label, cv2.COLOR_RGB2BGR))
             else:
                 raise NotImplementedError
         debug(f"Saved render: {cur_frame_idx}")
