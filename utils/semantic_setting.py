@@ -31,12 +31,14 @@ class Semantic_Config:
     
     Debug = False
     log_file = "results/slam_sp.log"
+    
     delete_save_dir = False
-    Pose_BA_flag = False
+    Pose_BA_flag = True
     track_setting = {
         'kf_only_iou': True,
-        'BA_window': 5,
+        # 'BA_window': 5,
     }
+    preload_semantic = True
 
 
 
