@@ -1,5 +1,6 @@
 import random
 import time
+from typing import Dict, List, Union
 
 import torch
 import torch.nn as nn
@@ -14,6 +15,7 @@ from utils.logging_utils import Log
 from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_mapping
 
+from utils.camera_utils import Camera
 from utils.semantic_utils import build_decoder
 from utils.semantic_setting import Semantic_Config
 
@@ -38,7 +40,7 @@ class BackEnd(mp.Process):
         self.iteration_count = 0
         self.last_sent = 0
         self.occ_aware_visibility = {}
-        self.viewpoints = {}
+        self.viewpoints:Dict[int, Camera] = dict()
         self.current_window = []
         self.initialized = not self.monocular
         self.keyframe_optimizers = None
@@ -91,6 +93,82 @@ class BackEnd(mp.Process):
         while not self.backend_queue.empty():
             self.backend_queue.get()
 
+    def track_update_optimizer(self, viewpoint:Camera = None, BA_flag = False, GBA_flag = False):
+        """
+        when tracking the next frame,
+        add the params of next frame into optimizer
+        """
+        opt_params = []
+
+        if BA_flag:
+            if GBA_flag and len(self.current_window) == self.window_size:
+                frames_to_optimize = self.window_size - 1
+            else:
+                frames_to_optimize = self.config["Training"]["pose_window"]
+            for cam_dix in range(min(frames_to_optimize, len(self.current_window))):
+                if self.current_window[cam_dix] == 0: # skip the first frame
+                    continue
+                old_viewpoint = self.viewpoints[self.current_window[cam_dix]]
+                opt_params.append(
+                    {
+                        "params": [old_viewpoint.cam_rot_delta],
+                        "lr": self.config["Training"]["lr"]["cam_rot_delta"] * 0.5,
+                        "name": "rot_{}".format(old_viewpoint.uid),
+                    }
+                )
+                opt_params.append(
+                    {
+                        "params": [old_viewpoint.cam_trans_delta],
+                        "lr": self.config["Training"]["lr"]["cam_trans_delta"] * 0.5,
+                        "name": "trans_{}".format(old_viewpoint.uid),
+                    }
+                )
+                opt_params.append(
+                    {
+                        "params": [old_viewpoint.exposure_a],
+                        "lr": 0.01,
+                        "name": "exposure_a_{}".format(old_viewpoint.uid),
+                    }
+                )
+                opt_params.append(
+                    {
+                        "params": [old_viewpoint.exposure_b],
+                        "lr": 0.01,
+                        "name": "exposure_b_{}".format(old_viewpoint.uid),
+                    }
+                )
+        elif viewpoint is not None:
+            opt_params.append(
+                {
+                    "params": [viewpoint.cam_rot_delta],
+                    "lr": self.config["Training"]["lr"]["cam_rot_delta"],
+                    "name": "rot_{}".format(viewpoint.uid),
+                }
+            )
+            opt_params.append(
+                {
+                    "params": [viewpoint.cam_trans_delta],
+                    "lr": self.config["Training"]["lr"]["cam_trans_delta"],
+                    "name": "trans_{}".format(viewpoint.uid),
+                }
+            )
+            opt_params.append(
+                {
+                    "params": [viewpoint.exposure_a],
+                    "lr": 0.01,
+                    "name": "exposure_a_{}".format(viewpoint.uid),
+                }
+            )
+            opt_params.append(
+                {
+                    "params": [viewpoint.exposure_b],
+                    "lr": 0.01,
+                    "name": "exposure_b_{}".format(viewpoint.uid),
+                }
+            )
+        pose_optimizer = torch.optim.Adam(opt_params)
+        return pose_optimizer
+    
     def initialize_map(self, cur_frame_idx, viewpoint):
         for mapping_iteration in range(self.init_itr_num):
             self.iteration_count += 1
@@ -426,7 +504,7 @@ class BackEnd(mp.Process):
                 self.map(self.current_window)
                 if self.last_sent >= 10:
                     self.map(self.current_window, prune=True, iters=10)
-                    self.push_to_frontend()
+                    # self.push_to_frontend()
                     print("empty map update")
             else:
                 data = self.backend_queue.get()
@@ -453,6 +531,8 @@ class BackEnd(mp.Process):
                     self.push_to_frontend("init")
 
                 elif data[0] == "keyframe":
+                    map_start_time = time.time()
+                    print("start mapping")
                     cur_frame_idx = data[1]
                     viewpoint = data[2]
                     current_window = data[3]
@@ -462,65 +542,25 @@ class BackEnd(mp.Process):
                     self.current_window = current_window
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
 
-                    opt_params = []
-                    frames_to_optimize = self.config["Training"]["pose_window"]
+                    GBA_flag = False
                     iter_per_kf = self.mapping_itr_num if self.single_thread else 10
                     if not self.initialized:
-                        if (
-                            len(self.current_window)
-                            == self.config["Training"]["window_size"]
-                        ):
-                            frames_to_optimize = (
-                                self.config["Training"]["window_size"] - 1
-                            )
+                        if len(self.current_window) == self.window_size:
+                            GBA_flag = True
                             iter_per_kf = 50 if self.live_mode else 300
                             Log("Performing initial BA for initialization")
                         else:
                             iter_per_kf = self.mapping_itr_num
-                    for cam_idx in range(len(self.current_window)):
-                        if self.current_window[cam_idx] == 0:
-                            continue
-                        viewpoint = self.viewpoints[current_window[cam_idx]]
-                        if cam_idx < frames_to_optimize:
-                            opt_params.append(
-                                {
-                                    "params": [viewpoint.cam_rot_delta],
-                                    "lr": self.config["Training"]["lr"]["cam_rot_delta"]
-                                    * 0.5,
-                                    "name": "rot_{}".format(viewpoint.uid),
-                                }
-                            )
-                            opt_params.append(
-                                {
-                                    "params": [viewpoint.cam_trans_delta],
-                                    "lr": self.config["Training"]["lr"][
-                                        "cam_trans_delta"
-                                    ]
-                                    * 0.5,
-                                    "name": "trans_{}".format(viewpoint.uid),
-                                }
-                            )
-                        opt_params.append(
-                            {
-                                "params": [viewpoint.exposure_a],
-                                "lr": 0.01,
-                                "name": "exposure_a_{}".format(viewpoint.uid),
-                            }
-                        )
-                        opt_params.append(
-                            {
-                                "params": [viewpoint.exposure_b],
-                                "lr": 0.01,
-                                "name": "exposure_b_{}".format(viewpoint.uid),
-                            }
-                        )
-                    self.keyframe_optimizers = torch.optim.Adam(opt_params)
 
+                    self.keyframe_optimizers = self.track_update_optimizer(BA_flag=Semantic_Config.Pose_BA_flag,
+                                                                           GBA_flag=GBA_flag)
+                    
                     self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)
                     self.map_semantic(iters=Semantic_Config.semantic_iter, window_size=Semantic_Config.semantic_window)
                     self.push_to_frontend("keyframe")
                     print("current_window", self.current_window)
+                    print("mapping time", time.time() - map_start_time)
                 else:
                     raise Exception("Unprocessed data", data)
         while not self.backend_queue.empty():
