@@ -74,6 +74,10 @@ class FrontEnd(mp.Process):
         self.single_thread = self.config["Dataset"]["single_thread"]
         self.eval_rendering = self.config["Results"]["eval_rendering"]
         self.depth_scale = self.config["Dataset"]["Calibration"]["depth_scale"]
+        
+        self.kf_translation = self.config["Training"]["kf_translation"]
+        self.kf_min_translation = self.config["Training"]["kf_min_translation"]
+        self.kf_overlap = self.config["Training"]["kf_overlap"]
     
     # def set_feature_extractor(self):
     #     self.feature_extractor = LSeg_FeatureExtractor(debug=True)
@@ -241,28 +245,34 @@ class FrontEnd(mp.Process):
         last_keyframe_idx,
         cur_frame_visibility_filter,
         occ_aware_visibility,
+        kf_overlap=0.9,
+        only_iou=False,
     ):
-        kf_translation = self.config["Training"]["kf_translation"]
-        kf_min_translation = self.config["Training"]["kf_min_translation"]
-        kf_overlap = self.config["Training"]["kf_overlap"]
-
         curr_frame = self.cameras[cur_frame_idx]
         last_kf = self.cameras[last_keyframe_idx]
+        # check_time
+        check_full_window = len(self.current_window) >= self.window_size
+        check_time = (cur_frame_idx - last_keyframe_idx) >= self.kf_interval
+        # count the distance
         pose_CW = getWorld2View2(curr_frame.R, curr_frame.T)
         last_kf_CW = getWorld2View2(last_kf.R, last_kf.T)
         last_kf_WC = torch.linalg.inv(last_kf_CW)
         dist = torch.norm((pose_CW @ last_kf_WC)[0:3, 3])
-        dist_check = dist > kf_translation * self.median_depth
-        dist_check2 = dist > kf_min_translation * self.median_depth
-
-        union = torch.logical_or(
-            cur_frame_visibility_filter, occ_aware_visibility[last_keyframe_idx]
-        ).count_nonzero()
-        intersection = torch.logical_and(
-            cur_frame_visibility_filter, occ_aware_visibility[last_keyframe_idx]
-        ).count_nonzero()
+        # Distance check
+        dist_check = dist > self.kf_translation * self.median_depth
+        dist_check2 = dist > self.kf_min_translation * self.median_depth
+        # Common visibility of Gauss points: kf_overlap
+        union = torch.logical_or(cur_frame_visibility_filter, 
+                                 occ_aware_visibility[last_keyframe_idx]).count_nonzero()
+        intersection = torch.logical_and(cur_frame_visibility_filter, 
+                                occ_aware_visibility[last_keyframe_idx]).count_nonzero()
         point_ratio_2 = intersection / union
-        return (point_ratio_2 < kf_overlap and dist_check2) or dist_check
+        if only_iou:
+            return point_ratio_2 < kf_overlap
+        elif check_full_window:
+            return (point_ratio_2 < kf_overlap and dist_check2) or dist_check
+        else:
+            return ((point_ratio_2 < kf_overlap and dist_check2) or dist_check) and check_time
 
     def add_to_window(
         self, cur_frame_idx, cur_frame_visibility_filter, occ_aware_visibility, window
@@ -557,19 +567,9 @@ class FrontEnd(mp.Process):
                     last_keyframe_idx,
                     curr_visibility,
                     self.occ_aware_visibility,
+                    kf_overlap=self.kf_overlap,
+                    only_iou=Semantic_Config.kf_only_iou
                 )
-                if len(self.current_window) < self.window_size:
-                    union = torch.logical_or(
-                        curr_visibility, self.occ_aware_visibility[last_keyframe_idx]
-                    ).count_nonzero()
-                    intersection = torch.logical_and(
-                        curr_visibility, self.occ_aware_visibility[last_keyframe_idx]
-                    ).count_nonzero()
-                    point_ratio = intersection / union
-                    create_kf = (
-                        check_time
-                        and point_ratio < self.config["Training"]["kf_overlap"]
-                    )
                 if self.single_thread:
                     create_kf = check_time and create_kf
                 if create_kf:

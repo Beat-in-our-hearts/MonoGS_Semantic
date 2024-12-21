@@ -34,10 +34,7 @@ class Semantic_Config:
     
     delete_save_dir = False
     Pose_BA_flag = True
-    track_setting = {
-        'kf_only_iou': True,
-        # 'BA_window': 5,
-    }
+    kf_only_iou = True
     preload_semantic = False
     gui_torch_mp = False
     synchronize = False

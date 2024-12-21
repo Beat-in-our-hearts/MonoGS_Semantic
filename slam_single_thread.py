@@ -306,13 +306,10 @@ class SLAM_SP:
         check3_visibility = point_ratio < kf_overlap
         if only_iou:
             return check3_visibility
+        elif check_full_window:
+            return (check3_visibility and check2_min_dist) or check1_dist
         else:
             return ((check3_visibility and check2_min_dist) or check1_dist) and check_time
-    
-        if check_full_window:
-            return ((check3_visibility and check2_min_dist) or check1_dist) and check_time
-        else:
-            return (check3_visibility and check_time)
         
         
     def track_update_keyframe_window(self, cur_frame_idx, cur_frame_visibility_filter, window:list):
@@ -1000,7 +997,7 @@ class SLAM_SP:
                         last_keyframe_idx,
                         curr_visibility,
                         kf_overlap = self.kf_overlap,
-                        only_iou=Semantic_Config.track_setting["kf_only_iou"]
+                        only_iou=Semantic_Config.kf_only_iou
                     )
                 
                 if create_kf:
