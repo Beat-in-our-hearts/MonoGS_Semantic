@@ -38,7 +38,9 @@ class Semantic_Config:
         'kf_only_iou': True,
         # 'BA_window': 5,
     }
-    preload_semantic = True
+    preload_semantic = False
+    gui_torch_mp = False
+    synchronize = False
 
 
 

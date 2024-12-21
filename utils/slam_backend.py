@@ -496,13 +496,13 @@ class BackEnd(mp.Process):
         while True:
             if self.backend_queue.empty():
                 if self.pause:
-                    time.sleep(0.01)
+                    time.sleep(0.1)
                     continue
                 if len(self.current_window) == 0:
-                    time.sleep(0.01)
+                    time.sleep(0.1)
                     continue
                 if self.single_thread:
-                    time.sleep(0.01)
+                    time.sleep(0.1)
                     continue
                 self.last_sent += 1
                 self.map(self.current_window)

@@ -80,8 +80,8 @@ class SLAM_GUI:
         self.save_path.mkdir(parents=True, exist_ok=True)
 
         self.init_feature_decoder()
-        threading.Thread(target=self._update_thread).start()
         
+        self.update_process = threading.Thread(target=self._update_thread, daemon=True).start()
 
     def init_feature_decoder(self):
         if Semantic_Config.enable:
@@ -827,7 +827,7 @@ class SLAM_GUI:
 
     def _update_thread(self):
         while True:
-            time.sleep(0.01)
+            time.sleep(0.1)
             self.step += 1
             if self.process_finished:
                 o3d.visualization.gui.Application.instance.quit()
@@ -835,7 +835,7 @@ class SLAM_GUI:
                 break
 
             def update():
-                if self.step % 50 == 0:
+                if self.step % 5 == 0:
                     self.scene_update()
 
                 if self.step >= 1e9:
