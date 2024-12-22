@@ -414,7 +414,7 @@ class SLAM_SP:
             )
             loss_init = get_loss_mapping(self.config, image, depth, viewpoint, opacity, initialization=True)
             if render_semantic_flag:
-                fmap_size = Semantic_Config.famp_size[Semantic_Config.mode]
+                fmap_size = Semantic_Config.fmap_size[Semantic_Config.mode]
                 feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), size=fmap_size,
                                                             mode="bilinear", align_corners=True).squeeze(0))
                 debug(f"{feature_map.shape}, {gt_feature.shape}")
@@ -469,7 +469,7 @@ class SLAM_SP:
                 viewpoint = viewpoint_stack[cam_idx]
                 render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
                 feature_map = render_pkg["feature_map"]
-                fmap_size = Semantic_Config.famp_size[Semantic_Config.mode]
+                fmap_size = Semantic_Config.fmap_size[Semantic_Config.mode]
                 feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), fmap_size,
                                                             mode="bilinear", align_corners=True).squeeze(0))
                 gt_feature = gt_feature_stack[cam_idx]
@@ -525,7 +525,7 @@ class SLAM_SP:
                 )
                 loss_mapping += get_loss_mapping(self.config, image, depth, viewpoint, opacity)
                 if render_semantic_flag:
-                    fmap_size = Semantic_Config.famp_size[Semantic_Config.mode]
+                    fmap_size = Semantic_Config.fmap_size[Semantic_Config.mode]
                     feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), fmap_size,
                                                                 mode="bilinear", align_corners=True).squeeze(0))
                     gt_feature = gt_feature_stack[cam_idx]

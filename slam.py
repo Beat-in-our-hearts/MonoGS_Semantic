@@ -22,7 +22,7 @@ from utils.multiprocessing_utils import FakeQueue
 from utils.slam_backend import BackEnd
 from utils.slam_frontend import FrontEnd
 
-from utils.semantic_setting import Semantic_Config
+from utils.semantic_setting import Semantic_Config, config_to_dict
 from utils.wandb_utils import wandb_init
 
 class SLAM:
@@ -223,6 +223,9 @@ if __name__ == "__main__":
     with open(args.config, "r") as yml:
         config = yaml.safe_load(yml)
     config = load_config(args.config)
+    
+    semantic_config_dict = config_to_dict(Semantic_Config)
+    config["Semantic_Config"] = semantic_config_dict
     
     # headless eval 
     if args.headless:

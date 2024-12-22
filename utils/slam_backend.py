@@ -437,7 +437,7 @@ class BackEnd(mp.Process):
                                     flag_semantic=True)
                 feature_map = render_pkg["feature_map"]
                 if Semantic_Config.mode == "SAM2":
-                    fmap_size = Semantic_Config.famp_size[Semantic_Config.mode]
+                    fmap_size = Semantic_Config.fmap_size[Semantic_Config.mode]
                     feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), fmap_size,
                                                                 mode="bilinear", align_corners=True).squeeze(0))
                     gt_feature = gt_feature_stack[cam_idx]
