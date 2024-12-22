@@ -550,7 +550,7 @@ class FrontEnd(mp.Process):
                 if self.reset:
                     self.initialize(cur_frame_idx, viewpoint)
                     self.current_window.append(cur_frame_idx)
-                    cur_frame_idx += 1
+                    cur_frame_idx += self.use_every_n_frames
                     continue
 
                 self.initialized = self.initialized or (
@@ -569,7 +569,7 @@ class FrontEnd(mp.Process):
 
                 if self.requested_keyframe > 0:
                     self.cleanup(cur_frame_idx)
-                    cur_frame_idx += 1
+                    cur_frame_idx += self.use_every_n_frames
                     continue
 
                 last_keyframe_idx = self.current_window[0]
@@ -610,7 +610,7 @@ class FrontEnd(mp.Process):
     
                 else:
                     self.cleanup(cur_frame_idx)
-                cur_frame_idx += 1
+                cur_frame_idx += self.use_every_n_frames
 
                 if (
                     self.save_results

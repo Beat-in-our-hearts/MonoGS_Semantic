@@ -7,7 +7,7 @@ class Semantic_Config_DataClass:
     wandb_project:str = "GSDFF_SLAM"
     save_root_dir:str = "results/replica"
     mode_list: List[str] = field(default_factory=lambda: ["SAM2", "GT_Label"])
-    mode:str = "GT_Label"
+    mode:str = "SAM2"
     enable:bool = True
     wandb_enable:bool = False
     
@@ -42,7 +42,7 @@ class Semantic_Config_DataClass:
     preload_semantic:bool = False
     gui_torch_mp:bool = False
     synchronize:bool = False
-    constant_velocity_warmup:int = 100
+    constant_velocity_warmup:int = 5
 
 Semantic_Config = Semantic_Config_DataClass()
 

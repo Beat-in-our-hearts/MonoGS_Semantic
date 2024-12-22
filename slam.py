@@ -215,6 +215,7 @@ if __name__ == "__main__":
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--render", action="store_true")
     
     args = parser.parse_args(sys.argv[1:])
     mp.set_start_method("spawn")
@@ -226,18 +227,20 @@ if __name__ == "__main__":
     semantic_config_dict = config_to_dict(Semantic_Config)
     config["Semantic_Config"] = semantic_config_dict
     
-    # headless eval 
-    if args.headless:
-        Log("Running MonoGS in Evaluation Mode")
-        Log("Following config will be overriden")
-        Log("\tsave_results=True")
-        config["Results"]["save_results"] = True
-        Log("\tuse_gui=False")
-        config["Results"]["use_gui"] = False
-        Log("\teval_rendering=True")
+    # render
+    if args.render:
         config["Results"]["eval_rendering"] = True
-        Log("\tuse_wandb=True")
+    # headless 
+    if args.headless:
+        config["Results"]["save_results"] = True
+        config["Results"]["use_gui"] = False
         config["Results"]["use_wandb"] = True
+        Log("Running MonoGS in Headless Mode")
+        Log("Following config will be overriden")
+    Log("\tsave_results=True")
+    Log("\tuse_gui=False")
+    Log("\teval_rendering=True")
+    Log("\tuse_wandb=True")
 
     # set save dir
     save_dir = None
