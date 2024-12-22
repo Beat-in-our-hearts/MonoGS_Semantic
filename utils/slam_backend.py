@@ -464,6 +464,7 @@ class BackEnd(mp.Process):
 
         iteration_total = 26000
         for iteration in tqdm(range(1, iteration_total + 1)):
+            loss = 0
             viewpoint_idx_stack = list(self.viewpoints.keys())
             viewpoint_cam_idx = viewpoint_idx_stack.pop(
                 random.randint(0, len(viewpoint_idx_stack) - 1)
@@ -472,17 +473,21 @@ class BackEnd(mp.Process):
             render_pkg = render(
                 viewpoint_cam, self.gaussians, self.pipeline_params, self.background
             )
-            image, visibility_filter, radii = (
+            image, depth, visibility_filter, radii = (
                 render_pkg["render"],
+                render_pkg["depth"],
                 render_pkg["visibility_filter"],
                 render_pkg["radii"],
             )
 
             gt_image = viewpoint_cam.original_image.cuda()
+            gt_depth = torch.tensor(viewpoint_cam.depth).cuda()
             Ll1 = l1_loss(image, gt_image)
-            loss = (1.0 - self.opt_params.lambda_dssim) * (
+            loss += (1.0 - self.opt_params.lambda_dssim) * (
                 Ll1
             ) + self.opt_params.lambda_dssim * (1.0 - ssim(image, gt_image))
+            if not self.monocular:
+                loss += l1_loss(depth, gt_depth)
             loss.backward()
             with torch.no_grad():
                 self.gaussians.max_radii2D[visibility_filter] = torch.max(
