@@ -170,8 +170,7 @@ class SLAM:
                     continue
                 data = frontend_queue.get()
                 if data[0] == "sync_backend" and frontend_queue.empty():
-                    gaussians = data[1]
-                    self.gaussians = gaussians
+                    self.gaussians.load_state_dict(data[1])
                     break
 
             rendering_result = eval_rendering(
