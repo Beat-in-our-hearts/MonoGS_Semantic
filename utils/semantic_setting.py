@@ -4,8 +4,8 @@ from dataclasses import dataclass
 class Semantic_Config:
     wandb_project:str = "GSDFF_SLAM"
     save_root_dir:str = "results/replica"
-    
-    mode:str = "SAM2"
+    mode_list = ["SAM2", "GT_Label"]
+    mode:str = "GT_Label"
     enable:bool = True
     wandb_enable:bool = False
     
@@ -17,7 +17,8 @@ class Semantic_Config:
     
     semantic_dim = { 
         "LSeg": 512,
-        "SAM2": 256   
+        "SAM2": 256,
+        "GT_Label": 128
     }
     famp_size = {
         "LSeg": [360, 480],
@@ -25,7 +26,8 @@ class Semantic_Config:
     }
     dataset_path = {
         "LSeg": "rgb_feature_lseg",
-        "SAM2": "rgb_feature_sam2"
+        "SAM2": "rgb_feature_sam2",
+        "GT_Label": "gt_label"
     }
     render_size = [360, 480]
     

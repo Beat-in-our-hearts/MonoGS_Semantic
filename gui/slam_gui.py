@@ -32,6 +32,8 @@ from utils.logging_utils import Log
 from utils.semantic_setting import Semantic_Config
 from utils.semantic_utils import apply_pca_colormap
 from diff_gaussian_rasterization import get_semantic_channels
+from utils.semantic_utils import build_decoder
+from imgviz import label_colormap
 
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
@@ -85,11 +87,13 @@ class SLAM_GUI:
 
     def init_feature_decoder(self):
         if Semantic_Config.enable:
-            self.pred_feature_dim = Semantic_Config.semantic_dim[Semantic_Config.mode]
-            self.semantic_feature_dim = get_semantic_channels()
-            self.cnn_decoder = nn.Conv2d(self.semantic_feature_dim, self.pred_feature_dim, kernel_size=1).to(self.device)
-            self.cnn_decoder.eval()
-        self.cnn_decoder_init = False
+            if Semantic_Config.mode == "SAM2":
+                self.cnn_decoder, _ = build_decoder(mode='eval')
+                self.semantic_gui_init = False
+            elif Semantic_Config.mode == "GT_Label":
+                self.semantic_gui_init = True
+        else:
+            self.semantic_gui_init = False
         # self.save_clip = True
         # self.cnn_decoder = nn.Conv2d(SEMANTIC_FEATURES_DIM, Distilled_Feature_DIM, kernel_size=1).to(self.device)
         # self.cnn_decoder.eval() # no gradient
@@ -103,7 +107,7 @@ class SLAM_GUI:
         self.window_w, self.window_h = 1600, 800
 
         self.window = gui.Application.instance.create_window(
-            "MonoGS", self.window_w, self.window_h
+            "GSDFF_SLAM", self.window_w, self.window_h
         )
         self.window.set_on_layout(self._on_layout)
         self.window.set_on_close(self._on_close)
@@ -472,7 +476,7 @@ class SLAM_GUI:
         if gaussian_packet.semantic_decoder is not None:
             state_dict_cpu = gaussian_packet.semantic_decoder
             self.cnn_decoder.load_state_dict({key: value.cuda() for key, value in state_dict_cpu.items()})
-            self.cnn_decoder_init = True
+            self.semantic_gui_init = True
             
         if gaussian_packet.current_frame is not None:
             frustum = self.add_camera(
@@ -687,7 +691,7 @@ class SLAM_GUI:
             render_img = o3d.geometry.Image(opacity)
         
         # [ADD Feature]
-        elif self.semantic_chbox.checked and results["feature_map"] is not None and self.cnn_decoder_init:
+        elif self.semantic_chbox.checked and results["feature_map"] is not None and self.semantic_gui_init:
             if Semantic_Config.mode == "LSeg":
                 feature_map = results["feature_map"]
                 render_shape = feature_map.shape # C H W
@@ -751,6 +755,22 @@ class SLAM_GUI:
                 mix_alpha = self.semantic_scaling_slider.double_value
                 mix_beta = 1 - mix_alpha
                 mix_img = (mix_alpha * img_sam2_pca + mix_beta * rgb).astype(np.uint8)
+                render_img = o3d.geometry.Image(mix_img)
+            elif Semantic_Config.mode == "GT_Label":
+                feature_map = results["feature_map"]
+                pred_label = torch.argmax(feature_map, dim=0).detach().cpu().numpy()
+                img_label = label_colormap()[pred_label]
+                rgb = (
+                    (torch.clamp(results["render"], min=0, max=1.0) * 255)
+                    .byte()
+                    .permute(1, 2, 0)
+                    .contiguous()
+                    .cpu()
+                    .numpy()
+                )
+                mix_alpha = self.semantic_scaling_slider.double_value
+                mix_beta = 1 - mix_alpha
+                mix_img = (mix_alpha * img_label + mix_beta * rgb).astype(np.uint8)
                 render_img = o3d.geometry.Image(mix_img)
  
         elif self.elipsoid_chbox.checked:

@@ -147,6 +147,7 @@ class SLAM:
                 self.background,
                 kf_indices=kf_indices,
                 iteration="before_opt",
+                depth_l1=not self.monocular,
             )
             columns = ["tag", "psnr", "ssim", "lpips", "RMSE ATE", "FPS"]
             metrics_table = wandb.Table(columns=columns)
@@ -182,6 +183,7 @@ class SLAM:
                 self.background,
                 kf_indices=kf_indices,
                 iteration="after_opt",
+                depth_l1=not self.monocular,
             )
             metrics_table.add_data(
                 "After",
@@ -265,7 +267,7 @@ if __name__ == "__main__":
             os.makedirs(save_dir, exist_ok=True)
 
     # run
-    start_time = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    start_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     Log(f"Time: {start_time}")
     
     slam = SLAM(config, save_dir=save_dir)

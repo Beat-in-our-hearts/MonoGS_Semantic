@@ -424,7 +424,7 @@ class ReplicaDataset_Semantic(MonocularDataset):
         self.poses = parser.poses
         self.semantic_paths = sorted(glob.glob(f"{dataset_path}/semantic_class/semantic_class_*.png"))
         self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.pt"))
-        
+
     def get_pred_semantic(self, idx):
         return self.pred_semantic_paths[idx]
     

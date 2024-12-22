@@ -1,7 +1,7 @@
 import glob
 import os
 import random
-import datetime
+from datetime import datetime
 import shutil
 import sys
 import time
@@ -903,10 +903,9 @@ class SLAM_SP:
                 .cpu()
                 .numpy()
             )
-        render_rgb = render_rgb[..., ::-1]
         
         render_rgb_path = os.path.join(rgb_root_dir, f"rgb_{cur_frame_idx:04d}.png")
-        cv2.imwrite(render_rgb_path, render_rgb)
+        cv2.imwrite(render_rgb_path, cv2.cvtColor(render_rgb, cv2.COLOR_RGB2BGR))
         
         render_depth = (render_depth * self.depth_scale).cpu().detach().numpy().astype(np.uint16)
         render_depth_path = os.path.join(depth_root_dir, f"depth_{cur_frame_idx:04d}.png")
@@ -1138,7 +1137,7 @@ if __name__ == "__main__":
             os.makedirs(save_dir, exist_ok=True)
 
     # run
-    start_time = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    start_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     Log(f"Time: {start_time}")
     slam = SLAM_SP(config, save_dir=save_dir)
     slam.run(resume=args.resume, eval=args.eval)

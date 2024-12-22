@@ -2,6 +2,7 @@ import random
 import time
 from typing import Dict, List, Union
 
+import cv2
 import torch
 import torch.nn as nn
 import torch.multiprocessing as mp
@@ -16,7 +17,7 @@ from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_mapping
 
 from utils.camera_utils import Camera
-from utils.semantic_utils import build_decoder
+from utils.semantic_utils import build_decoder, label_loss
 from utils.semantic_setting import Semantic_Config
 
 class BackEnd(mp.Process):
@@ -48,7 +49,8 @@ class BackEnd(mp.Process):
         self.keyframe_optimizers = None
         
         # CNN Decoder to upsample semantic features
-        self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
+        if Semantic_Config.mode == "SAM2":
+            self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
 
     def set_hyperparams(self):
         self.save_results = self.config["Results"]["save_results"]
@@ -216,8 +218,6 @@ class BackEnd(mp.Process):
                     self.iteration_count == self.opt_params.densify_from_iter
                 ):
                     self.gaussians.reset_opacity()
-                self.cnn_decoder_optimizer.step()
-                self.cnn_decoder_optimizer.zero_grad()
                 self.gaussians.optimizer.step()
                 self.gaussians.optimizer.zero_grad(set_to_none=True)
 
@@ -410,15 +410,23 @@ class BackEnd(mp.Process):
         semantic_window = self.current_window[:window_size]
         viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
         
+        gt_label_stack = []
         gt_feature_stack = []
-        if Semantic_Config.preload_semantic:
+        if Semantic_Config.mode == "GT_Label":
             for i in range(len(semantic_window)):
-                gt_feature_stack.append(self.gt_semantic_stack[semantic_window[i]])
+                gt_label_path = self.dataset.get_gt_semantic(semantic_window[i])
+                label_img = cv2.imread(gt_label_path)[:,:,0] # W H
+                gt_label = torch.tensor(label_img).long().cuda()
+                gt_label_stack.append(gt_label)
         else:
-            for i in range(len(semantic_window)):
-                gt_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
-                gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
-                gt_feature_stack.append(gt_feature)
+            if Semantic_Config.preload_semantic:
+                for i in range(len(semantic_window)):
+                    gt_feature_stack.append(self.gt_semantic_stack[semantic_window[i]])
+            else:
+                for i in range(len(semantic_window)):
+                    gt_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
+                    gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
+                    gt_feature_stack.append(gt_feature)
     
         semantic_loss = []
         for _ in range(iters):
@@ -428,18 +436,26 @@ class BackEnd(mp.Process):
                 render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background,
                                     flag_semantic=True)
                 feature_map = render_pkg["feature_map"]
-                fmap_size = Semantic_Config.famp_size[Semantic_Config.mode]
-                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), fmap_size,
-                                                            mode="bilinear", align_corners=True).squeeze(0))
-                gt_feature = gt_feature_stack[cam_idx]
-                l1_feature = l1_loss(feature_map, gt_feature)
-                loss_semantic += l1_feature
-                
+                if Semantic_Config.mode == "SAM2":
+                    fmap_size = Semantic_Config.famp_size[Semantic_Config.mode]
+                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), fmap_size,
+                                                                mode="bilinear", align_corners=True).squeeze(0))
+                    gt_feature = gt_feature_stack[cam_idx]
+                    l1_feature = l1_loss(feature_map, gt_feature)
+                    loss_semantic += l1_feature
+                    
+                elif Semantic_Config.mode == "GT_Label":
+                    gt_label = gt_label_stack[cam_idx]
+                    loss_label = label_loss(feature_map.unsqueeze(0), gt_label.unsqueeze(0))
+                    loss_semantic += loss_label
+                else:
+                    raise NotImplementedError
             semantic_loss.append(loss_semantic.item())
             loss_semantic.backward()
             with torch.no_grad():
-                self.cnn_decoder_optimizer.step()
-                self.cnn_decoder_optimizer.zero_grad()
+                if Semantic_Config.mode == "SAM2":
+                    self.cnn_decoder_optimizer.step()
+                    self.cnn_decoder_optimizer.zero_grad()
                 self.gaussians.semantic_optimizer.step()
                 self.gaussians.semantic_optimizer.zero_grad()
                 
@@ -487,8 +503,9 @@ class BackEnd(mp.Process):
             tag = "sync_backend"
         state_dict_cpu = None
         if Semantic_Config.enable:
-            decoder_state_dict = self.cnn_decoder.state_dict()
-            state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
+            if Semantic_Config.mode == "SAM2":
+                decoder_state_dict = self.cnn_decoder.state_dict()
+                state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
         msg = [tag, self.gaussians.get_state_dict(), self.occ_aware_visibility, keyframes, state_dict_cpu]
         self.frontend_queue.put(msg)
 

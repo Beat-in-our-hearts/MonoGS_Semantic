@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from utils.semantic_setting import Semantic_Config
 from diff_gaussian_rasterization import get_semantic_channels
@@ -63,3 +64,12 @@ def build_decoder(mode='train', lr=0.0005):
         cnn_decoder = nn.Conv2d(semantic_feature_dim, pred_feature_dim, kernel_size=1).to("cuda")
         cnn_decoder.eval()
     return cnn_decoder, cnn_decoder_optimizer
+
+def label_loss(pred:torch.Tensor, label:torch.Tensor) -> torch.Tensor:
+    """
+    Args:
+        pred: (B, C, H, W)
+        label: (B, H, W)
+    """
+    assert pred.dim() == 4 and label.dim() == 3, f"pred dim: {pred.dim()}, label dim: {label.dim()}"
+    return nn.CrossEntropyLoss()(pred, label)
