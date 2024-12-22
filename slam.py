@@ -22,7 +22,7 @@ from utils.multiprocessing_utils import FakeQueue
 from utils.slam_backend import BackEnd
 from utils.slam_frontend import FrontEnd
 
-from utils.semantic_setting import Semantic_Config
+from utils.semantic_setting import Semantic_Config, config_to_dict
 from utils.wandb_utils import wandb_init
 
 class SLAM:
@@ -170,8 +170,7 @@ class SLAM:
                     continue
                 data = frontend_queue.get()
                 if data[0] == "sync_backend" and frontend_queue.empty():
-                    gaussians = data[1]
-                    self.gaussians = gaussians
+                    self.gaussians.load_state_dict(data[1])
                     break
 
             rendering_result = eval_rendering(
@@ -223,6 +222,9 @@ if __name__ == "__main__":
     with open(args.config, "r") as yml:
         config = yaml.safe_load(yml)
     config = load_config(args.config)
+    
+    semantic_config_dict = config_to_dict(Semantic_Config)
+    config["Semantic_Config"] = semantic_config_dict
     
     # headless eval 
     if args.headless:
