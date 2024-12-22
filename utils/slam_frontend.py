@@ -170,6 +170,19 @@ class FrontEnd(mp.Process):
             ))
 
     def tracking(self, cur_frame_idx, viewpoint:Camera):
+        if self.initialized and cur_frame_idx > Semantic_Config.constant_velocity_warmup:
+            prev_prev = self.cameras[cur_frame_idx - self.use_every_n_frames -1 ]
+            prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
+        
+            pose_prev_prev = prev_prev.get_T_matrix4x4
+            pose_prev = prev.get_T_matrix4x4
+            velocity = pose_prev @ torch.linalg.inv(pose_prev_prev)
+            pose_new = velocity @ pose_prev
+            viewpoint.update_RT(pose_new[:3, :3], pose_new[:3, 3])
+        else:
+            prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
+            viewpoint.T = prev.T
+            
         prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
         viewpoint.update_RT(prev.R, prev.T)
 
@@ -224,16 +237,6 @@ class FrontEnd(mp.Process):
                 pose_optimizer.step()
                 converged = update_pose(viewpoint)
 
-            # if tracking_itr % 30 == 0:
-            #     self.q_main2vis.put(
-            #         gui_utils.GaussianPacket(
-            #             current_frame=viewpoint,
-            #             gtcolor=viewpoint.original_image.permute(1, 2, 0).cpu().numpy(),
-            #             gtdepth=viewpoint.depth
-            #             if not self.monocular
-            #             else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-            #         )
-            #     )
             if converged:
                 break
         debug(f"Track Iteration: {tracking_itr}")

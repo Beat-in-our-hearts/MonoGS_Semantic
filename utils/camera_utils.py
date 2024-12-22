@@ -116,6 +116,13 @@ class Camera(nn.Module):
         return new_camera
 
     @property
+    def get_T_matrix4x4(self):
+        T = torch.eye(4, device=self.device)
+        T[:3, :3] = self.R
+        T[:3, 3] = self.T
+        return T
+    
+    @property
     def world_view_transform(self):
         return getWorld2View2(self.R, self.T).transpose(0, 1)
 

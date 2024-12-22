@@ -42,6 +42,7 @@ class Semantic_Config_DataClass:
     preload_semantic:bool = False
     gui_torch_mp:bool = False
     synchronize:bool = False
+    constant_velocity_warmup:int = 100
 
 Semantic_Config = Semantic_Config_DataClass()
 
