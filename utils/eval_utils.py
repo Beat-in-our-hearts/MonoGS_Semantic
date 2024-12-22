@@ -53,7 +53,7 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     #     json.dump(ape_stats, f, indent=4)
 
     plot_mode = evo.tools.plot.PlotMode.xy
-    fig = plt.figure(figsize=(10, 10))
+    fig = plt.figure(figsize=(16, 9), dpi=120)
     ax = evo.tools.plot.prepare_axis(fig, plot_mode)
     ax.set_title(f"ATE RMSE: {ape_stat}")
     evo.tools.plot.traj(ax, plot_mode, traj_ref, "--", "gray", "gt")
@@ -191,7 +191,7 @@ def eval_rendering(
     output["mean_psnr"] = float(np.mean(psnr_array))
     output["mean_ssim"] = float(np.mean(ssim_array))
     output["mean_lpips"] = float(np.mean(lpips_array))
-    output["mean_depth_l1"] = float(np.mean(depth_l1_array)) if depth_l1 else None
+    output["mean_depth_l1"] = float(np.mean(depth_l1_array)) if depth_l1 else 0
 
     Log(
         f'mean psnr: {output["mean_psnr"]:.2f}, ' + f'ssim: {output["mean_ssim"]:.3f}, ' + \
