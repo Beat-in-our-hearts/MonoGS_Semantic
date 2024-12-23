@@ -4,3 +4,6 @@
 [submodule "submodules/diff-gaussian-rasterization"]
 	path = submodules/diff-gaussian-rasterization
 	url = https://github.com/Beat-in-our-hearts/diff-gaussian-rasterization-semantic-slam.git
+[submodule "submodules/sam2"]
+	path = submodules/sam2
+	url = https://github.com/facebookresearch/sam2.git
