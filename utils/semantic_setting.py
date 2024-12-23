@@ -7,9 +7,11 @@ class Semantic_Config_DataClass:
     wandb_project:str = "GSDFF_SLAM"
     save_root_dir:str = "results/replica"
     mode_list: List[str] = field(default_factory=lambda: ["SAM2", "GT_Label"])
-    mode:str = "SAM2"
+    mode:str = "GT_Label"
     enable:bool = True
     wandb_enable:bool = False
+    
+    eval_segmentation:bool = True
     
     gs_init_lr:float = 10.0
     

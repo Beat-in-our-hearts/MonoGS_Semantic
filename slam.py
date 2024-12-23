@@ -16,7 +16,7 @@ from gaussian_splatting.utils.system_utils import mkdir_p
 from gui import gui_utils, slam_gui
 from utils.config_utils import load_config
 from utils.dataset import load_dataset
-from utils.eval_utils import eval_ate, eval_rendering, save_gaussians
+from utils.eval_utils import eval_ate, eval_rendering, save_gaussians, eval_segmentation
 from utils.logging_utils import Log
 from utils.multiprocessing_utils import FakeQueue
 from utils.slam_backend import BackEnd
@@ -129,9 +129,10 @@ class SLAM:
         if self.eval_rendering:
             self.gaussians = self.frontend.gaussians
             kf_indices = self.frontend.kf_indices
-            ATE = eval_ate(
+            all_frame_id = list(range(self.frontend.kf_indices[-1]))
+            ate_result = eval_ate(
                 self.frontend.cameras,
-                self.frontend.kf_indices,
+                all_frame_id,
                 self.save_dir,
                 0,
                 final=True,
@@ -149,14 +150,27 @@ class SLAM:
                 iteration="before_opt",
                 depth_l1=not self.monocular,
             )
-            columns = ["tag", "psnr", "ssim", "lpips", "RMSE ATE", "FPS"]
+            if Semantic_Config.eval_segmentation:
+                seg_result = eval_segmentation(
+                            self.frontend.cameras,
+                            self.dataset,
+                            self.gaussians,
+                            self.pipeline_params,
+                            self.background,
+                            self.save_dir,
+                        )
+            else:
+                seg_result = {"pixel_acc": 0, "mIoU": 0}
+            columns = ["scene_name", "tag", "Render_Metrics", "ATE_Metrics", "Seg_Metrics", "FPS"]
+            normalized_path = os.path.normpath(self.config["Dataset"]["dataset_path"])
+            scene_name = os.path.basename(normalized_path)
             metrics_table = wandb.Table(columns=columns)
             metrics_table.add_data(
+                scene_name,
                 "Before",
-                rendering_result["mean_psnr"],
-                rendering_result["mean_ssim"],
-                rendering_result["mean_lpips"],
-                ATE,
+                rendering_result,
+                ate_result,
+                seg_result,
                 FPS,
             )
 
@@ -184,16 +198,26 @@ class SLAM:
                 iteration="after_opt",
                 depth_l1=not self.monocular,
             )
+            if Semantic_Config.eval_segmentation:
+                seg_result = eval_segmentation(
+                            self.frontend.cameras,
+                            self.dataset,
+                            self.gaussians,
+                            self.pipeline_params,
+                            self.background,
+                            self.save_dir,
+                        )
+            else:
+                seg_result = {"pixel_acc": 0, "mIoU": 0}
             metrics_table.add_data(
+                scene_name,
                 "After",
-                rendering_result["mean_psnr"],
-                rendering_result["mean_ssim"],
-                rendering_result["mean_lpips"],
-                ATE,
+                rendering_result,
+                ate_result,
+                seg_result,
                 FPS,
             )
             wandb.log({"Metrics": metrics_table})
-            save_gaussians(self.gaussians, self.save_dir, "final_after_opt", final=True)
 
         backend_queue.put(["stop"])
         backend_process.join()

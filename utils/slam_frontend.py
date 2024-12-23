@@ -17,7 +17,7 @@ from gaussian_splatting.scene.gaussian_model import GaussianModel
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from gui import gui_utils
 from utils.camera_utils import Camera
-from utils.eval_utils import eval_ate, eval_rendering
+from utils.eval_utils import eval_ate, eval_rendering, eval_segmentation
 from utils.logging_utils import Log, debug
 from utils.camera_utils import Camera
 from utils.multiprocessing_utils import clone_obj
@@ -449,11 +449,17 @@ class FrontEnd(mp.Process):
                 render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
                 cv2.imwrite(render_semantic_path, img_sam2_pca)
             elif Semantic_Config.mode == "GT_Label":
+                semantic_class_root_dir = os.path.join(self.save_dir, "render", 'semantic_class')
+                os.makedirs(semantic_class_root_dir, exist_ok=True)
+                
                 feature_map = render_pkg["feature_map"]
                 pred_label = torch.argmax(feature_map, dim=0).detach().cpu().numpy()
                 img_label = label_colormap()[pred_label]
+                
                 render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
                 cv2.imwrite(render_semantic_path, cv2.cvtColor(img_label, cv2.COLOR_RGB2BGR))
+                semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{cur_frame_idx:04d}.png")
+                cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
             else:
                 raise NotImplementedError
         debug(f"Saved render: {cur_frame_idx}")
@@ -512,16 +518,7 @@ class FrontEnd(mp.Process):
             if self.frontend_queue.empty():
                 tic.record()
                 if cur_frame_idx >= len(self.dataset):
-                    if self.save_results:
-                        eval_ate(
-                            self.cameras,
-                            self.kf_indices,
-                            self.save_dir,
-                            0,
-                            final=True,
-                            monocular=self.monocular,
-                        )
-                        
+                    if self.save_results: 
                         self.save_state_dict("final")
                     break
 
@@ -639,6 +636,16 @@ class FrontEnd(mp.Process):
                         iteration="before_opt",
                         depth_l1=not self.monocular
                     )
+                    if Semantic_Config.eval_segmentation:
+                        seg_result = eval_segmentation(
+                            self.cameras,
+                            self.dataset,
+                            self.gaussians,
+                            self.pipeline_params,
+                            self.background,
+                        )
+                    else:
+                        seg_result = {"pixel_acc": 0, "mIoU": 0}
                     kf_idx = self.kf_indices[-1]
                     kf_output = {
                         "frame_idx": kf_idx,
@@ -647,7 +654,9 @@ class FrontEnd(mp.Process):
                         "psnr": rendering_result["mean_psnr"],
                         "ssim": rendering_result["mean_ssim"],
                         "lpips": rendering_result["mean_lpips"],
-                        "depth_l1": rendering_result["mean_depth_l1"]
+                        "depth_l1": rendering_result["mean_depth_l1"],
+                        "seg_pix_acc": seg_result["pixel_acc"],
+                        "seg_mIoU": seg_result["mIoU"],
                     }
                     wandb.log(kf_output)
                     if self.save_results:
