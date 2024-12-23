@@ -17,7 +17,7 @@ from gaussian_splatting.scene.gaussian_model import GaussianModel
 from gaussian_splatting.utils.graphics_utils import getProjectionMatrix2, getWorld2View2
 from gui import gui_utils
 from utils.camera_utils import Camera
-from utils.eval_utils import eval_ate, eval_rendering
+from utils.eval_utils import eval_ate, eval_rendering, eval_segmentation
 from utils.logging_utils import Log, debug
 from utils.camera_utils import Camera
 from utils.multiprocessing_utils import clone_obj
@@ -170,6 +170,19 @@ class FrontEnd(mp.Process):
             ))
 
     def tracking(self, cur_frame_idx, viewpoint:Camera):
+        if self.initialized and cur_frame_idx > Semantic_Config.constant_velocity_warmup:
+            prev_prev = self.cameras[cur_frame_idx - self.use_every_n_frames -1 ]
+            prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
+        
+            pose_prev_prev = prev_prev.get_T_matrix4x4
+            pose_prev = prev.get_T_matrix4x4
+            velocity = pose_prev @ torch.linalg.inv(pose_prev_prev)
+            pose_new = velocity @ pose_prev
+            viewpoint.update_RT(pose_new[:3, :3], pose_new[:3, 3])
+        else:
+            prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
+            viewpoint.T = prev.T
+            
         prev = self.cameras[cur_frame_idx - self.use_every_n_frames]
         viewpoint.update_RT(prev.R, prev.T)
 
@@ -224,16 +237,6 @@ class FrontEnd(mp.Process):
                 pose_optimizer.step()
                 converged = update_pose(viewpoint)
 
-            # if tracking_itr % 30 == 0:
-            #     self.q_main2vis.put(
-            #         gui_utils.GaussianPacket(
-            #             current_frame=viewpoint,
-            #             gtcolor=viewpoint.original_image.permute(1, 2, 0).cpu().numpy(),
-            #             gtdepth=viewpoint.depth
-            #             if not self.monocular
-            #             else np.zeros((viewpoint.image_height, viewpoint.image_width)),
-            #         )
-            #     )
             if converged:
                 break
         debug(f"Track Iteration: {tracking_itr}")
@@ -446,11 +449,17 @@ class FrontEnd(mp.Process):
                 render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
                 cv2.imwrite(render_semantic_path, img_sam2_pca)
             elif Semantic_Config.mode == "GT_Label":
+                semantic_class_root_dir = os.path.join(self.save_dir, "render", 'semantic_class')
+                os.makedirs(semantic_class_root_dir, exist_ok=True)
+                
                 feature_map = render_pkg["feature_map"]
                 pred_label = torch.argmax(feature_map, dim=0).detach().cpu().numpy()
                 img_label = label_colormap()[pred_label]
+                
                 render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
                 cv2.imwrite(render_semantic_path, cv2.cvtColor(img_label, cv2.COLOR_RGB2BGR))
+                semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{cur_frame_idx:04d}.png")
+                cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
             else:
                 raise NotImplementedError
         debug(f"Saved render: {cur_frame_idx}")
@@ -509,16 +518,7 @@ class FrontEnd(mp.Process):
             if self.frontend_queue.empty():
                 tic.record()
                 if cur_frame_idx >= len(self.dataset):
-                    if self.save_results:
-                        eval_ate(
-                            self.cameras,
-                            self.kf_indices,
-                            self.save_dir,
-                            0,
-                            final=True,
-                            monocular=self.monocular,
-                        )
-                        
+                    if self.save_results: 
                         self.save_state_dict("final")
                     break
 
@@ -547,7 +547,7 @@ class FrontEnd(mp.Process):
                 if self.reset:
                     self.initialize(cur_frame_idx, viewpoint)
                     self.current_window.append(cur_frame_idx)
-                    cur_frame_idx += 1
+                    cur_frame_idx += self.use_every_n_frames
                     continue
 
                 self.initialized = self.initialized or (
@@ -566,7 +566,7 @@ class FrontEnd(mp.Process):
 
                 if self.requested_keyframe > 0:
                     self.cleanup(cur_frame_idx)
-                    cur_frame_idx += 1
+                    cur_frame_idx += self.use_every_n_frames
                     continue
 
                 last_keyframe_idx = self.current_window[0]
@@ -607,7 +607,7 @@ class FrontEnd(mp.Process):
     
                 else:
                     self.cleanup(cur_frame_idx)
-                cur_frame_idx += 1
+                cur_frame_idx += self.use_every_n_frames
 
                 if (
                     self.save_results
@@ -636,6 +636,16 @@ class FrontEnd(mp.Process):
                         iteration="before_opt",
                         depth_l1=not self.monocular
                     )
+                    if Semantic_Config.eval_segmentation:
+                        seg_result = eval_segmentation(
+                            self.cameras,
+                            self.dataset,
+                            self.gaussians,
+                            self.pipeline_params,
+                            self.background,
+                        )
+                    else:
+                        seg_result = {"pixel_acc": 0, "mIoU": 0}
                     kf_idx = self.kf_indices[-1]
                     kf_output = {
                         "frame_idx": kf_idx,
@@ -644,7 +654,9 @@ class FrontEnd(mp.Process):
                         "psnr": rendering_result["mean_psnr"],
                         "ssim": rendering_result["mean_ssim"],
                         "lpips": rendering_result["mean_lpips"],
-                        "depth_l1": rendering_result["mean_depth_l1"]
+                        "depth_l1": rendering_result["mean_depth_l1"],
+                        "seg_pix_acc": seg_result["pixel_acc"],
+                        "seg_mIoU": seg_result["mIoU"],
                     }
                     wandb.log(kf_output)
                     if self.save_results:

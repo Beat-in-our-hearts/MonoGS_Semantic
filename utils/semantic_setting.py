@@ -11,6 +11,8 @@ class Semantic_Config_DataClass:
     enable:bool = True
     wandb_enable:bool = False
     
+    eval_segmentation:bool = True
+    
     gs_init_lr:float = 10.0
     
     semantic_window:int = 4
@@ -42,6 +44,7 @@ class Semantic_Config_DataClass:
     preload_semantic:bool = False
     gui_torch_mp:bool = False
     synchronize:bool = False
+    constant_velocity_warmup:int = 5
 
 Semantic_Config = Semantic_Config_DataClass()
 

@@ -22,6 +22,9 @@ from gaussian_splatting.utils.loss_utils import ssim, l1_loss
 from gaussian_splatting.utils.system_utils import mkdir_p
 from utils.logging_utils import Log
 
+from utils.semantic_setting import Semantic_Config
+from utils.eval_segmentation import SegmentationMetric
+from diff_gaussian_rasterization import get_semantic_channels
 
 def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ## Plot
@@ -212,3 +215,32 @@ def save_gaussians(gaussians, name, iteration, final=False):
             name, "point_cloud/iteration_{}".format(str(iteration))
         )
     gaussians.save_ply(point_cloud_path + "_point_cloud.ply")
+
+def eval_segmentation(frames, dataset, gaussians, pipe, background, save_dir=None):
+    seg_metric = SegmentationMetric(nclass=get_semantic_channels())
+    if save_dir is not None:
+        semantic_class_root_dir = os.path.join(save_dir, "render", 'eval_semantic_class')
+        os.makedirs(semantic_class_root_dir, exist_ok=True)
+            
+    for idx in range(len(frames)):
+        frame = frames[idx]
+        
+        if Semantic_Config.mode == "GT_Label":
+            render_pkg = render(frame, gaussians, pipe, background, flag_semantic=True)
+            feature_map = render_pkg["feature_map"]
+            pred_label = torch.argmax(feature_map, dim=0).detach().cpu().numpy().astype(np.uint8)
+            
+            gt_label_path = dataset.get_gt_semantic(idx)
+            gt_label = cv2.imread(gt_label_path)[:,:,0].astype(np.uint8)
+            seg_metric.update(pred_label, gt_label)
+            
+        if save_dir is not None:    
+            semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{idx:04d}.png")
+            cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
+
+    pixel_acc, mIoU = seg_metric.get()
+    Log(
+        f'pixel_acc: {pixel_acc:.3f}, ' + f'mIoU: {mIoU:.3f}',
+        tag="Eval",
+    )
+    return {'pixel_acc': pixel_acc, 'mIoU': mIoU}

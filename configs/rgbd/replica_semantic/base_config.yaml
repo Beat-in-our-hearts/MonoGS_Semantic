@@ -9,8 +9,8 @@ Results:
 
 Dataset:
   sensor_type: 'depth'
-  pcd_downsample: 64
-  pcd_downsample_init: 32
+  pcd_downsample: 16
+  pcd_downsample_init: 8
   adaptive_pointsize: True
   point_size: 0.05
   type: 'replica_semantic'
