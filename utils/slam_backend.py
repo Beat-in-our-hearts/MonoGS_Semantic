@@ -515,6 +515,7 @@ class BackEnd(mp.Process):
         self.frontend_queue.put(msg)
 
     def run(self):
+        torch.set_num_threads(2)
         while True:
             if self.backend_queue.empty():
                 if self.pause:
