@@ -487,6 +487,7 @@ class FrontEnd(mp.Process):
             
 
     def run(self):
+        torch.set_num_threads(2)
         cur_frame_idx = 0
         projection_matrix = getProjectionMatrix2(
             znear=0.01,
