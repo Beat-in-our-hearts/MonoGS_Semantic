@@ -1,3 +1,6 @@
+import numpy as np
+from scipy.sparse import save_npz, load_npz, csr_matrix, vstack
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -73,3 +76,24 @@ def label_loss(pred:torch.Tensor, label:torch.Tensor) -> torch.Tensor:
     """
     assert pred.dim() == 4 and label.dim() == 3, f"pred dim: {pred.dim()}, label dim: {label.dim()}"
     return nn.CrossEntropyLoss()(pred, label)
+
+def save_seg_map(seg_map, filepath):
+    sparse_map_list = []
+    for i in range(seg_map.shape[0]):
+        sparse_map_list.append(csr_matrix(seg_map[i]))
+    save_npz(filepath, vstack(sparse_map_list))
+    
+def load_seg_map(filepath, W, H):
+    sparse_matrix = load_npz(filepath)
+
+    total_rows = sparse_matrix.shape[0]
+    if total_rows % W != 0:
+        raise ValueError("Stored sparse matrix shape is inconsistent with the provided W and H.")
+    N = total_rows // W
+    
+    dense_seg_map = np.stack([
+        sparse_matrix[i * W:(i + 1) * W].toarray()
+        for i in range(N)
+    ], axis=0)
+
+    return dense_seg_map
