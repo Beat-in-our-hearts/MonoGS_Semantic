@@ -7,7 +7,6 @@ import numpy as np
 import torch
 import trimesh
 from PIL import Image
-import lycon
 
 from gaussian_splatting.utils.graphics_utils import focal2fov
 try:
@@ -259,7 +258,7 @@ class MonocularDataset(BaseDataset):
         color_path = self.color_paths[idx]
         pose = self.poses[idx]
 
-        image = lycon.load(color_path)
+        image = cv2.imread(color_path)
         depth = None
 
         if self.disorted:

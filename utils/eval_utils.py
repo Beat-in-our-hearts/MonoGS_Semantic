@@ -234,9 +234,9 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background, save_dir=Non
             gt_label = cv2.imread(gt_label_path)[:,:,0].astype(np.uint8)
             seg_metric.update(pred_label, gt_label)
             
-        if save_dir is not None:    
-            semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{idx:04d}.png")
-            cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
+            if save_dir is not None:    
+                semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{idx:04d}.png")
+                cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
 
     pixel_acc, mIoU = seg_metric.get()
     Log(

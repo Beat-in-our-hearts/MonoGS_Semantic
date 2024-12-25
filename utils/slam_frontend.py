@@ -637,7 +637,7 @@ class FrontEnd(mp.Process):
                         iteration="before_opt",
                         depth_l1=not self.monocular
                     )
-                    if Semantic_Config.eval_segmentation:
+                    if Semantic_Config.eval_segmentation and Semantic_Config.mode == "GT_Label":
                         seg_result = eval_segmentation(
                             self.cameras,
                             self.dataset,

@@ -198,17 +198,17 @@ class SLAM:
                 iteration="after_opt",
                 depth_l1=not self.monocular,
             )
-            if Semantic_Config.eval_segmentation:
-                seg_result = eval_segmentation(
-                            self.frontend.cameras,
-                            self.dataset,
-                            self.gaussians,
-                            self.pipeline_params,
-                            self.background,
-                            self.save_dir,
-                        )
-            else:
-                seg_result = {"pixel_acc": 0, "mIoU": 0}
+            # if Semantic_Config.eval_segmentation:
+            #     seg_result = eval_segmentation(
+            #                 self.frontend.cameras,
+            #                 self.dataset,
+            #                 self.gaussians,
+            #                 self.pipeline_params,
+            #                 self.background,
+            #                 self.save_dir,
+            #             )
+            # else:
+            #     seg_result = {"pixel_acc": 0, "mIoU": 0}
             metrics_table.add_data(
                 scene_name,
                 "After",
@@ -258,7 +258,7 @@ if __name__ == "__main__":
     if args.headless:
         config["Results"]["save_results"] = True
         config["Results"]["use_gui"] = False
-        config["Results"]["use_wandb"] = True
+        config["Results"]["use_wandb"] = False
         Log("Running MonoGS in Headless Mode")
         Log("Following config will be overriden")
     Log("\tsave_results=True")
