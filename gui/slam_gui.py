@@ -30,7 +30,7 @@ from utils.camera_utils import Camera
 from utils.logging_utils import Log
 
 from utils.semantic_setting import Semantic_Config
-from utils.semantic_utils import apply_pca_colormap
+from utils.semantic_utils import apply_pca_colormap, generate_colored_mask
 from diff_gaussian_rasterization import get_semantic_channels
 from utils.semantic_utils import build_decoder
 from imgviz import label_colormap
@@ -87,11 +87,27 @@ class SLAM_GUI:
 
     def init_feature_decoder(self):
         if Semantic_Config.enable:
-            if Semantic_Config.mode == "SAM2":
+            if Semantic_Config.mode in ["SAM2", "CLIP"]:
                 self.cnn_decoder, _ = build_decoder(mode='eval')
                 self.semantic_gui_init = False
             elif Semantic_Config.mode == "GT_Label":
                 self.semantic_gui_init = True
+                
+            if Semantic_Config.mode ==  "CLIP":
+                from feature_encoder.dense_clip_extractor.clip import clip
+                from feature_encoder.dense_clip_extractor.clip_extract import CLIPArgs
+                from feature_encoder.dense_clip_extractor.clip.clip import tokenize
+                self.clip_model, _ = clip.load(CLIPArgs.model_name, device=self.device)
+                
+                text_query = ["rug", "table", "chair", "window"]
+                tokens = tokenize(text_query).to(self.device)
+                text_embs = self.clip_model.encode_text(tokens)
+                self.text_embs = text_embs / text_embs.norm(dim=-1, keepdim=True)
+                print(self.text_embs.shape)
+
+                # sims = clip_embs @ text_embs.T
+                # sims = sims.squeeze()
+                # print(sims.shape)
         else:
             self.semantic_gui_init = False
         # self.save_clip = True
@@ -725,15 +741,32 @@ class SLAM_GUI:
                 resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
                                                     size=Semantic_Config.render_size,
                                                     mode="bilinear", align_corners=True).squeeze(0))
-                if self.save_clip:
-                    torch.save(resize_feature_map, "resize_feature_map.pt")
-                    self.save_clip = False
-                resize_feature_map = resize_feature_map.permute(1, 2, 0)
-                clip_pca = apply_pca_colormap(resize_feature_map)[0].detach().cpu().numpy() # H W C
-                img_clip_pca = (clip_pca*255).astype(np.uint8)
-                # Image.fromarray(img_clip_pca).save("clip_pca.png")
-                img_clip_pca = cv2.resize(img_clip_pca, (render_shape[2], render_shape[1]))
-                render_img = o3d.geometry.Image(img_clip_pca)
+
+                resize_feature_map = resize_feature_map.permute(1, 2, 0) # H W D                
+                sims = resize_feature_map.half() @ self.text_embs.T # H W N
+                sims = sims.detach().cpu().numpy()
+                img_color_mask = generate_colored_mask([sims[:,:,i] for i in range(sims.shape[-1])], 90)
+                img_color_mask = cv2.resize(img_color_mask, (render_shape[2], render_shape[1]))
+                
+                rgb = (
+                    (torch.clamp(results["render"], min=0, max=1.0) * 255)
+                    .byte()
+                    .permute(1, 2, 0)
+                    .contiguous()
+                    .cpu()
+                    .numpy()
+                )
+                mix_alpha = self.semantic_scaling_slider.double_value
+                mix_beta = 1 - mix_alpha
+                mix_img = (mix_alpha * img_color_mask + mix_beta * rgb).astype(np.uint8)
+                render_img = o3d.geometry.Image(mix_img)
+                
+                
+                # clip_pca = apply_pca_colormap(resize_feature_map)[0].detach().cpu().numpy() 
+                # img_clip_pca = (clip_pca*255).astype(np.uint8)
+
+                # img_clip_pca = cv2.resize(img_clip_pca, (render_shape[2], render_shape[1]))
+                # render_img = o3d.geometry.Image(img_clip_pca)
             elif Semantic_Config.mode == "SAM2":
                 feature_map = results["feature_map"]
                 render_shape = feature_map.shape
