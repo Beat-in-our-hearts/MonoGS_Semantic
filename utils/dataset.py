@@ -258,7 +258,7 @@ class MonocularDataset(BaseDataset):
         color_path = self.color_paths[idx]
         pose = self.poses[idx]
 
-        image = cv2.imread(color_path)
+        image = cv2.cvtColor(cv2.imread(color_path), cv2.COLOR_BGR2RGB)
         depth = None
 
         if self.disorted:
@@ -423,6 +423,7 @@ class ReplicaDataset_Semantic(MonocularDataset):
         self.poses = parser.poses
         self.semantic_paths = sorted(glob.glob(f"{dataset_path}/semantic_class/semantic_class_*.png"))
         self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.pt"))
+        print("Number of pred_semantic: ", len(self.pred_semantic_paths))
 
     def get_pred_semantic(self, idx):
         return self.pred_semantic_paths[idx]

@@ -220,8 +220,9 @@ class GaussianModel:
 
         return fused_point_cloud, features, scales, rots, opacities
 
-    def init_lr(self, spatial_lr_scale):
+    def init_lr(self, spatial_lr_scale, semantic_lr_scale):
         self.spatial_lr_scale = spatial_lr_scale
+        self.semantic_lr_scale = semantic_lr_scale
 
     def extend_from_pcd(
         self, fused_point_cloud, features, scales, rots, opacities, kf_id
@@ -303,7 +304,7 @@ class GaussianModel:
         s_l = [
             {
                 "params": [self._semantic_feature], # [ADD Feat]
-                "lr": training_args.semantic_feature_lr, 
+                "lr": training_args.semantic_feature_lr * self.semantic_lr_scale, 
                 "name": "semantic_feature", 
             }
         ]   

@@ -61,7 +61,7 @@ class FrontEnd(mp.Process):
         self.pause = False
         
         # CNN Decoder to upsample semantic features
-        if Semantic_Config.mode == "SAM2":
+        if Semantic_Config.mode in ["SAM2", "CLIP"]:
             self.cnn_decoder, _ = build_decoder(mode='eval')
 
     def set_hyperparams(self):
@@ -460,6 +460,13 @@ class FrontEnd(mp.Process):
                 cv2.imwrite(render_semantic_path, cv2.cvtColor(img_label, cv2.COLOR_RGB2BGR))
                 semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{cur_frame_idx:04d}.png")
                 cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
+            elif Semantic_Config.mode == "CLIP":
+                feature_map = render_pkg["feature_map"]
+                render_shape = feature_map.shape
+                resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                    size= Semantic_Config.render_size,
+                                                    mode="bilinear", align_corners=True).squeeze(0))
+                raise NotImplementedError
             else:
                 raise NotImplementedError
         debug(f"Saved render: {cur_frame_idx}")
@@ -472,7 +479,7 @@ class FrontEnd(mp.Process):
         self.gaussians.save_ply(path=os.path.join(ckpts_dir, f"gaussian_kf_{text}.ply"))
         
         if Semantic_Config.enable:
-            if Semantic_Config.mode == "SAM2":
+            if Semantic_Config.mode in ["SAM2", "CLIP"]:
                 decoder_state_dict = self.cnn_decoder.state_dict()
                 torch.save(decoder_state_dict, os.path.join(ckpts_dir,  f"decoder_{text}.pth"))
         
