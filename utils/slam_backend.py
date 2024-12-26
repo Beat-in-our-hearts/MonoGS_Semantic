@@ -49,7 +49,7 @@ class BackEnd(mp.Process):
         self.keyframe_optimizers = None
         
         # CNN Decoder to upsample semantic features
-        if Semantic_Config.mode == "SAM2":
+        if Semantic_Config.mode in ["SAM2", "CLIP"]:
             self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
 
     def set_hyperparams(self):
@@ -436,11 +436,12 @@ class BackEnd(mp.Process):
                 render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background,
                                     flag_semantic=True)
                 feature_map = render_pkg["feature_map"]
-                if Semantic_Config.mode == "SAM2":
-                    fmap_size = Semantic_Config.fmap_size[Semantic_Config.mode]
-                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), fmap_size,
+                if Semantic_Config.mode in ["SAM2", "CLIP"]:
+                    render_size = Semantic_Config.render_size
+                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), render_size,
                                                                 mode="bilinear", align_corners=True).squeeze(0))
                     gt_feature = gt_feature_stack[cam_idx]
+                    gt_feature = F.interpolate(gt_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
                     l1_feature = l1_loss(feature_map, gt_feature)
                     loss_semantic += l1_feature
                     
@@ -451,9 +452,12 @@ class BackEnd(mp.Process):
                 else:
                     raise NotImplementedError
             semantic_loss.append(loss_semantic.item())
+            if len(semantic_loss) % 10 == 0:
+                eval_loss = semantic_loss[-10:]
+                Log(f"semantic loss: {sum(eval_loss)/10}")
             loss_semantic.backward()
             with torch.no_grad():
-                if Semantic_Config.mode == "SAM2":
+                if Semantic_Config.mode in ["SAM2", "CLIP"]:
                     self.cnn_decoder_optimizer.step()
                     self.cnn_decoder_optimizer.zero_grad()
                 self.gaussians.semantic_optimizer.step()
@@ -508,7 +512,7 @@ class BackEnd(mp.Process):
             tag = "sync_backend"
         state_dict_cpu = None
         if Semantic_Config.enable:
-            if Semantic_Config.mode == "SAM2":
+            if Semantic_Config.mode in ["SAM2", "CLIP"]:
                 decoder_state_dict = self.cnn_decoder.state_dict()
                 state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
         msg = [tag, self.gaussians.get_state_dict(), self.occ_aware_visibility, keyframes, state_dict_cpu]
