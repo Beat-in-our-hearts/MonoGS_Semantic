@@ -31,3 +31,6 @@ dependencies:
     - lpips
     - rich
     - ruff
+    - ftfy
+    - einops
+    - regex
