@@ -56,7 +56,7 @@ class SLAM:
         self.gaussians = GaussianModel(model_params.sh_degree, config=self.config)
         self.track_gaussians = GaussianModel(model_params.sh_degree, config=self.config)
         
-        self.gaussians.init_lr(Semantic_Config.gs_init_lr)
+        self.gaussians.init_lr(Semantic_Config.gs_init_lr, Semantic_Config.semantic_lr_scale)
         self.dataset = load_dataset(
             model_params, model_params.source_path, config=config
         )
