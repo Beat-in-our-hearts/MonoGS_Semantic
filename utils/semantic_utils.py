@@ -1,3 +1,5 @@
+import cv2
+from matplotlib import pyplot as plt
 import numpy as np
 from scipy.sparse import save_npz, load_npz, csr_matrix, vstack
 
@@ -7,6 +9,10 @@ import torch.nn.functional as F
 
 from utils.semantic_setting import Semantic_Config
 from diff_gaussian_rasterization import get_semantic_channels
+import seaborn as sns
+    
+adepallete = [0,0,0,120,120,120,180,120,120,6,230,230,80,50,50,4,200,3,120,120,80,140,140,140,204,5,255,230,230,230,4,250,7,224,5,255,235,255,7,150,5,61,120,120,70,8,255,51,255,6,82,143,255,140,204,255,4,255,51,7,204,70,3,0,102,200,61,230,250,255,6,51,11,102,255,255,7,71,255,9,224,9,7,230,220,220,220,255,9,92,112,9,255,8,255,214,7,255,224,255,184,6,10,255,71,255,41,10,7,255,255,224,255,8,102,8,255,255,61,6,255,194,7,255,122,8,0,255,20,255,8,41,255,5,153,6,51,255,235,12,255,160,150,20,0,163,255,140,140,140,250,10,15,20,255,0,31,255,0,255,31,0,255,224,0,153,255,0,0,0,255,255,71,0,0,235,255,0,173,255,31,0,255,11,200,200,255,82,0,0,255,245,0,61,255,0,255,112,0,255,133,255,0,0,255,163,0,255,102,0,194,255,0,0,143,255,51,255,0,0,82,255,0,255,41,0,255,173,10,0,255,173,255,0,0,255,153,255,92,0,255,0,255,255,0,245,255,0,102,255,173,0,255,0,20,255,184,184,0,31,255,0,255,61,0,71,255,255,0,204,0,255,194,0,255,82,0,10,255,0,112,255,51,0,255,0,194,255,0,122,255,0,255,163,255,153,0,0,255,10,255,112,0,143,255,0,82,0,255,163,255,0,255,235,0,8,184,170,133,0,255,0,255,92,184,0,255,255,0,31,0,184,255,0,214,255,255,0,112,92,255,0,0,224,255,112,224,255,70,184,160,163,0,255,153,0,255,71,255,0,255,0,163,255,204,0,255,0,143,0,255,235,133,255,0,255,0,235,245,0,255,255,0,122,255,245,0,10,190,212,214,255,0,0,204,255,20,0,255,255,255,0,0,153,255,0,41,255,0,255,204,41,0,255,41,255,0,173,0,255,0,245,255,71,0,255,122,0,255,0,255,184,0,92,255,184,255,0,0,133,255,255,214,0,25,194,194,102,255,0,92,0,255]
+adepallete = np.array(adepallete).reshape(-1, 3)
 
 def apply_pca_colormap_return_proj(
     image:torch.Tensor,
@@ -54,6 +60,60 @@ def apply_pca_colormap(
 ):
     return apply_pca_colormap_return_proj(image, proj_V, low_rank_min, low_rank_max, niter)[0]
 
+
+def overlay_heatmaps_seaborn(heatmaps, alphas, cmaps, figsize=(8, 8)):
+    fig, ax = plt.subplots(figsize=figsize)
+    # 遍历热力图，依次绘制
+    for heatmap, alpha, cmap in zip(heatmaps, alphas, cmaps):
+        sns.heatmap(
+            heatmap,
+            cmap=cmap,
+            alpha=alpha,  # 设置透明度
+            cbar=False,   # 关闭单独颜色条
+            square=True,  # 确保单元格为正方形
+            xticklabels=False,  # 隐藏坐标
+            yticklabels=False,   # 隐藏坐标
+            ax=ax
+        )
+    plt.axis("off")
+    plt.savefig("/tmp/temp_vis.png", bbox_inches="tight", pad_inches=0)
+    plt.close(fig)
+    return cv2.cvtColor(cv2.imread("/tmp/temp_vis.png"), cv2.COLOR_BGR2RGB)
+
+def apply_sim_colormap(img_embeds:torch.Tensor, text_embeds:torch.Tensor, gamma=5):
+    sims = img_embeds @ text_embeds.T # H W D * D N -> H W N 
+    sims = sims.squeeze()
+    print(sims.shape)
+    heatmaps = []
+    for i in range(sims.shape[-1]):
+        heatmaps.append(sims[:,:,i].detach().cpu().numpy()** gamma)
+    alphas = [0.6] * sims.shape[-1]
+    all_colormaps = plt.colormaps()
+    cmaps = [all_colormaps[i] for i in range(0, len(all_colormaps), len(all_colormaps) // sims.shape[-1])] 
+    img = overlay_heatmaps_seaborn(heatmaps, alphas, cmaps)
+    return img
+
+
+# ["rug", "table", "chair", "window"]
+def generate_colored_mask(heatmaps, thresholded=95):
+    num_heatmaps = len(heatmaps)
+    mixed_mask = np.zeros((heatmaps[0].shape[0], heatmaps[0].shape[1], 3), dtype=np.float32)
+    for idx, heatmap in enumerate(heatmaps):
+        percentile = np.percentile(heatmap, thresholded)
+        mask = heatmap > percentile
+        colored_mask = np.zeros((mask.shape[0], mask.shape[1], 3), dtype=np.uint8)
+        colored_mask[mask == 1] = adepallete[150 // (num_heatmaps+1) * (idx+1) - 1]
+        mixed_mask += colored_mask * (1/num_heatmaps)
+    mixed_mask = mixed_mask.astype(np.uint8)
+    return mixed_mask
+    
+# gamma = 5
+# heatmap1 = sims[0, :,:,0].detach().cpu().numpy()** gamma 
+# heatmap2 = sims[0, :,:,1].detach().cpu().numpy()** gamma
+# heatmap3 = sims[0, :,:,2].detach().cpu().numpy()** gamma
+# heatmap4 = sims[0, :,:,3].detach().cpu().numpy()** gamma
+# heatmaps = [heatmap1, heatmap2, heatmap3, heatmap4]
+# generate_colored_mask(heatmaps)
 
 def build_decoder(mode='train', lr=0.0005):
     pred_feature_dim = Semantic_Config.semantic_dim[Semantic_Config.mode]
