@@ -61,8 +61,10 @@ class FrontEnd(mp.Process):
         self.pause = False
         
         # CNN Decoder to upsample semantic features
-        if Semantic_Config.mode in ["SAM2", "CLIP"]:
+        if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
             self.cnn_decoder, _ = build_decoder(mode='eval')
+            
+        self.clip_model = None
 
     def set_hyperparams(self):
         self.save_dir = self.config["Results"]["save_dir"]
@@ -467,6 +469,9 @@ class FrontEnd(mp.Process):
                                                     size= Semantic_Config.render_size,
                                                     mode="bilinear", align_corners=True).squeeze(0))
                 raise NotImplementedError
+            elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
+                # raise NotImplementedError
+                pass
             else:
                 raise NotImplementedError
         debug(f"Saved render: {cur_frame_idx}")
@@ -479,7 +484,7 @@ class FrontEnd(mp.Process):
         self.gaussians.save_ply(path=os.path.join(ckpts_dir, f"gaussian_kf_{text}.ply"))
         
         if Semantic_Config.enable:
-            if Semantic_Config.mode in ["SAM2", "CLIP"]:
+            if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
                 decoder_state_dict = self.cnn_decoder.state_dict()
                 torch.save(decoder_state_dict, os.path.join(ckpts_dir,  f"decoder_{text}.pth"))
         
@@ -526,6 +531,9 @@ class FrontEnd(mp.Process):
             if self.frontend_queue.empty():
                 tic.record()
                 if cur_frame_idx >= len(self.dataset):
+                    if self.requested_keyframe:
+                        time.sleep(0.5)
+                        continue
                     if self.save_results: 
                         self.save_state_dict("final")
                     break
