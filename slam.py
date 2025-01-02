@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import sys
@@ -24,6 +25,7 @@ from utils.slam_frontend import FrontEnd
 
 from utils.semantic_setting import Semantic_Config, config_to_dict
 from utils.wandb_utils import wandb_init
+import clip
 
 class SLAM:
     def __init__(self, config, save_dir=None):
@@ -56,7 +58,7 @@ class SLAM:
         self.gaussians = GaussianModel(model_params.sh_degree, config=self.config)
         self.track_gaussians = GaussianModel(model_params.sh_degree, config=self.config)
         
-        self.gaussians.init_lr(Semantic_Config.gs_init_lr)
+        self.gaussians.init_lr(Semantic_Config.gs_init_lr, Semantic_Config.semantic_lr_scale)
         self.dataset = load_dataset(
             model_params, model_params.source_path, config=config
         )
@@ -87,7 +89,18 @@ class SLAM:
         self.frontend.q_vis2main = q_vis2main
         self.frontend.use_gui = self.use_gui
         self.frontend.set_hyperparams()
-
+        # NOTE : Load CLIP model
+        self.frontend.clip_model, _ = clip.load("ViT-B/32", device=self.frontend.device, 
+                                        jit=True, download_root="/tmp")
+        self.frontend.clip_model.eval()
+        with open("gui/info_semantic.json", "r") as f:
+            info_semantic = json.load(f) 
+        class_names = [item["name"] for item in info_semantic["classes"]]
+        gt_text_tokens = clip.tokenize(class_names).to(self.frontend.device)
+        gt_text_features = self.frontend.clip_model.encode_text(gt_text_tokens)
+        gt_text_features /= gt_text_features.norm(dim=-1, keepdim=True)
+        self.gt_text_features = gt_text_features.to(torch.float32)
+        
         self.backend.dataset = self.dataset
         self.backend.gaussians = self.gaussians
         self.backend.background = self.background
@@ -151,6 +164,7 @@ class SLAM:
                 depth_l1=not self.monocular,
             )
             if Semantic_Config.eval_segmentation:
+                cnn_decoder_state_dict = self.frontend.cnn_decoder.state_dict()
                 seg_result = eval_segmentation(
                             self.frontend.cameras,
                             self.dataset,
@@ -158,6 +172,8 @@ class SLAM:
                             self.pipeline_params,
                             self.background,
                             self.save_dir,
+                            cnn_decoder_state_dict,
+                            self.gt_text_features,
                         )
             else:
                 seg_result = {"pixel_acc": 0, "mIoU": 0}
@@ -198,17 +214,17 @@ class SLAM:
                 iteration="after_opt",
                 depth_l1=not self.monocular,
             )
-            if Semantic_Config.eval_segmentation:
-                seg_result = eval_segmentation(
-                            self.frontend.cameras,
-                            self.dataset,
-                            self.gaussians,
-                            self.pipeline_params,
-                            self.background,
-                            self.save_dir,
-                        )
-            else:
-                seg_result = {"pixel_acc": 0, "mIoU": 0}
+            # if Semantic_Config.eval_segmentation:
+            #     seg_result = eval_segmentation(
+            #                 self.frontend.cameras,
+            #                 self.dataset,
+            #                 self.gaussians,
+            #                 self.pipeline_params,
+            #                 self.background,
+            #                 self.save_dir,
+            #             )
+            # else:
+            #     seg_result = {"pixel_acc": 0, "mIoU": 0}
             metrics_table.add_data(
                 scene_name,
                 "After",
@@ -258,13 +274,13 @@ if __name__ == "__main__":
     if args.headless:
         config["Results"]["save_results"] = True
         config["Results"]["use_gui"] = False
-        config["Results"]["use_wandb"] = True
+        config["Results"]["use_wandb"] = False
         Log("Running MonoGS in Headless Mode")
         Log("Following config will be overriden")
-    Log("\tsave_results=True")
-    Log("\tuse_gui=False")
-    Log("\teval_rendering=True")
-    Log("\tuse_wandb=True")
+    Log(f"\tsave_results={config['Results']['save_results']}")
+    Log(f"\tuse_gui={config['Results']['use_gui']}")
+    Log(f"\teval_rendering={config['Results']['eval_rendering']}")
+    Log(f"\tuse_wandb={config['Results']['use_wandb']}")
 
     # set save dir
     save_dir = None

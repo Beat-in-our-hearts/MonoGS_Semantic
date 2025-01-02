@@ -15,6 +15,7 @@ Dataset:
   pcd_downsample_init: 32
   adaptive_pointsize: True
   point_size: 0.01
+  single_thread: False
 
 Training:
   #Initialization
@@ -43,7 +44,6 @@ Training:
   kf_overlap: 0.9
   kf_cutoff: 0.3
   prune_mode: 'slam'
-  single_thread: False
   spherical_harmonics: False
   lr:
     cam_rot_delta: 0.003

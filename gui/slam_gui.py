@@ -1,8 +1,10 @@
+import json
 import pathlib
 import threading
 import time
 from datetime import datetime
 from PIL import Image
+import clip
 import cv2
 import glfw
 import imgviz
@@ -29,8 +31,9 @@ from gui.gui_utils import (
 from utils.camera_utils import Camera
 from utils.logging_utils import Log
 
+
 from utils.semantic_setting import Semantic_Config
-from utils.semantic_utils import apply_pca_colormap
+from utils.semantic_utils import apply_pca_colormap, generate_colored_mask
 from diff_gaussian_rasterization import get_semantic_channels
 from utils.semantic_utils import build_decoder
 from imgviz import label_colormap
@@ -38,8 +41,9 @@ from imgviz import label_colormap
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
 
 
+
 class SLAM_GUI:
-    def __init__(self, params_gui=None):
+    def __init__(self, params_gui=None, **kwargs):
         self.step = 0
         self.process_finished = False
         self.device = "cuda"
@@ -87,11 +91,44 @@ class SLAM_GUI:
 
     def init_feature_decoder(self):
         if Semantic_Config.enable:
-            if Semantic_Config.mode == "SAM2":
+            if Semantic_Config.mode in ["SAM2", "CLIP"]:
                 self.cnn_decoder, _ = build_decoder(mode='eval')
                 self.semantic_gui_init = False
             elif Semantic_Config.mode == "GT_Label":
                 self.semantic_gui_init = True
+            elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
+                self.cnn_decoder, _ = build_decoder(mode='eval')
+                self.semantic_gui_init = False
+                
+                clip_model, _ = clip.load("ViT-B/32", device=self.device, 
+                                        jit=True, download_root="/tmp")
+                clip_model.eval()
+                with open("gui/info_semantic.json", "r") as f:
+                    info_semantic = json.load(f) 
+                class_names = [item["name"] for item in info_semantic["classes"]]
+                gt_text_tokens = clip.tokenize(class_names).to(self.device)
+                gt_text_features = clip_model.encode_text(gt_text_tokens)
+                gt_text_features /= gt_text_features.norm(dim=-1, keepdim=True)
+                self.gt_text_features = gt_text_features.to(torch.float32)
+                # delete the clip model
+                del clip_model
+                
+            if Semantic_Config.mode ==  "CLIP":
+                raise NotImplementedError("CLIP mode is not implemented yet.")
+                # from feature_encoder.dense_clip_extractor.clip import clip
+                # from feature_encoder.dense_clip_extractor.clip_extract import CLIPArgs
+                # from feature_encoder.dense_clip_extractor.clip.clip import tokenize
+                # self.clip_model, _ = clip.load(CLIPArgs.model_name, device=self.device)
+                
+                # text_query = ["rug", "table", "chair", "window"]
+                # tokens = tokenize(text_query).to(self.device)
+                # text_embs = self.clip_model.encode_text(tokens)
+                # self.text_embs = text_embs / text_embs.norm(dim=-1, keepdim=True)
+                # print(self.text_embs.shape)
+
+                # sims = clip_embs @ text_embs.T
+                # sims = sims.squeeze()
+                # print(sims.shape)
         else:
             self.semantic_gui_init = False
         # self.save_clip = True
@@ -223,6 +260,14 @@ class SLAM_GUI:
         self.semantic_scaling_slider.set_limits(0.1, 1.0)
         self.semantic_scaling_slider.double_value = 0.5
         chbox_tile_geometry.add_child(self.semantic_scaling_slider)
+        
+        # ADD similarity threshold 
+        ssim_slider_label = gui.Label("Similarity Threshold (0-1)")
+        self.similarity_scaling_slider = gui.Slider(gui.Slider.DOUBLE)
+        self.similarity_scaling_slider.set_limits(0.1, 0.9)
+        self.similarity_scaling_slider.double_value = 0.2
+        chbox_tile_geometry.add_child(ssim_slider_label)
+        chbox_tile_geometry.add_child(self.similarity_scaling_slider)
         
         self.time_shader_chbox = gui.Checkbox("Time Shader")
         self.time_shader_chbox.checked = False
@@ -725,15 +770,32 @@ class SLAM_GUI:
                 resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
                                                     size=Semantic_Config.render_size,
                                                     mode="bilinear", align_corners=True).squeeze(0))
-                if self.save_clip:
-                    torch.save(resize_feature_map, "resize_feature_map.pt")
-                    self.save_clip = False
-                resize_feature_map = resize_feature_map.permute(1, 2, 0)
-                clip_pca = apply_pca_colormap(resize_feature_map)[0].detach().cpu().numpy() # H W C
-                img_clip_pca = (clip_pca*255).astype(np.uint8)
-                # Image.fromarray(img_clip_pca).save("clip_pca.png")
-                img_clip_pca = cv2.resize(img_clip_pca, (render_shape[2], render_shape[1]))
-                render_img = o3d.geometry.Image(img_clip_pca)
+
+                resize_feature_map = resize_feature_map.permute(1, 2, 0) # H W D                
+                sims = resize_feature_map.half() @ self.text_embs.T # H W N
+                sims = sims.detach().cpu().numpy()
+                img_color_mask = generate_colored_mask([sims[:,:,i] for i in range(sims.shape[-1])], 90)
+                img_color_mask = cv2.resize(img_color_mask, (render_shape[2], render_shape[1]))
+                
+                rgb = (
+                    (torch.clamp(results["render"], min=0, max=1.0) * 255)
+                    .byte()
+                    .permute(1, 2, 0)
+                    .contiguous()
+                    .cpu()
+                    .numpy()
+                )
+                mix_alpha = self.semantic_scaling_slider.double_value
+                mix_beta = 1 - mix_alpha
+                mix_img = (mix_alpha * img_color_mask + mix_beta * rgb).astype(np.uint8)
+                render_img = o3d.geometry.Image(mix_img)
+                
+                
+                # clip_pca = apply_pca_colormap(resize_feature_map)[0].detach().cpu().numpy() 
+                # img_clip_pca = (clip_pca*255).astype(np.uint8)
+
+                # img_clip_pca = cv2.resize(img_clip_pca, (render_shape[2], render_shape[1]))
+                # render_img = o3d.geometry.Image(img_clip_pca)
             elif Semantic_Config.mode == "SAM2":
                 feature_map = results["feature_map"]
                 render_shape = feature_map.shape
@@ -756,6 +818,47 @@ class SLAM_GUI:
                 mix_beta = 1 - mix_alpha
                 mix_img = (mix_alpha * img_sam2_pca + mix_beta * rgb).astype(np.uint8)
                 render_img = o3d.geometry.Image(mix_img)
+            elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
+                feature_map = results["feature_map"]
+                render_shape = feature_map.shape
+                resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                    size= Semantic_Config.render_size,
+                                                    mode="bilinear", align_corners=True).squeeze(0))
+                
+                # W x H x N
+                pred_ssim = resize_feature_map.permute(1, 2, 0) @ self.gt_text_features.T
+                # TODO filter low ssim  color black, all N channel < 0.2
+                threshold = self.similarity_scaling_slider.double_value
+                black_mask = (pred_ssim < threshold).all(dim=-1)
+                pred_label = (pred_ssim.argmax(dim=-1) + 1) # W x H, 0 is background
+                pred_label[black_mask] = 0
+                pred_label = pred_label.detach().cpu().numpy()
+                
+                # TODO fix similar label such as [blinds, window] [floor rug] 
+                transform_label_dict = {97:12, 98:40}
+                for key, value in transform_label_dict.items():
+                    pred_label[pred_label == key] = value
+                    
+                img_label = label_colormap()[pred_label]
+                img_label = cv2.resize(img_label, (render_shape[2], render_shape[1]))
+                
+                # sam2_pca = apply_pca_colormap(resize_feature_map.permute(1, 2, 0)).detach().cpu().numpy() # H W C
+                # img_sam2_pca = (sam2_pca*255).astype(np.uint8)
+                # img_sam2_pca = cv2.resize(img_sam2_pca, (render_shape[2], render_shape[1]))
+                
+                rgb = (
+                    (torch.clamp(results["render"], min=0, max=1.0) * 255)
+                    .byte()
+                    .permute(1, 2, 0)
+                    .contiguous()
+                    .cpu()
+                    .numpy()
+                )
+                mix_alpha = self.semantic_scaling_slider.double_value
+                mix_beta = 1 - mix_alpha
+                mix_img = (mix_alpha * img_label + mix_beta * rgb).astype(np.uint8)
+                render_img = o3d.geometry.Image(mix_img)
+                
             elif Semantic_Config.mode == "GT_Label":
                 feature_map = results["feature_map"]
                 pred_label = torch.argmax(feature_map, dim=0).detach().cpu().numpy()
@@ -772,6 +875,7 @@ class SLAM_GUI:
                 mix_beta = 1 - mix_alpha
                 mix_img = (mix_alpha * img_label + mix_beta * rgb).astype(np.uint8)
                 render_img = o3d.geometry.Image(mix_img)
+
  
         elif self.elipsoid_chbox.checked:
             if self.gaussian_cur is None:

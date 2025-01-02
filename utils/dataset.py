@@ -7,7 +7,6 @@ import numpy as np
 import torch
 import trimesh
 from PIL import Image
-import lycon
 
 from gaussian_splatting.utils.graphics_utils import focal2fov
 try:
@@ -259,7 +258,7 @@ class MonocularDataset(BaseDataset):
         color_path = self.color_paths[idx]
         pose = self.poses[idx]
 
-        image = lycon.load(color_path)
+        image = cv2.cvtColor(cv2.imread(color_path), cv2.COLOR_BGR2RGB)
         depth = None
 
         if self.disorted:
@@ -424,12 +423,25 @@ class ReplicaDataset_Semantic(MonocularDataset):
         self.poses = parser.poses
         self.semantic_paths = sorted(glob.glob(f"{dataset_path}/semantic_class/semantic_class_*.png"))
         self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.pt"))
+        if Semantic_Config.mode == "SAM_CLIP":
+            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/mask_auto_label_*.png"))
+        elif Semantic_Config.mode == "Grounding_Dino":
+            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/pred_label_*.png"))
+        print("Number of pred_semantic: ", len(self.pred_semantic_paths))
 
     def get_pred_semantic(self, idx):
         return self.pred_semantic_paths[idx]
     
     def get_gt_semantic(self, idx):
         return self.semantic_paths[idx]
+    
+    def get_pred_label(self, idx):
+        if Semantic_Config.mode == "SAM_CLIP":
+            return self.pred_label_paths[idx]
+        elif Semantic_Config.mode == "Grounding_Dino":
+            return self.pred_label_paths[idx]
+        else:
+            return None
 
 
 class EurocDataset(StereoDataset):

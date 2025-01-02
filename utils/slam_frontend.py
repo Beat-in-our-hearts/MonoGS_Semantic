@@ -61,8 +61,10 @@ class FrontEnd(mp.Process):
         self.pause = False
         
         # CNN Decoder to upsample semantic features
-        if Semantic_Config.mode == "SAM2":
+        if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
             self.cnn_decoder, _ = build_decoder(mode='eval')
+            
+        self.clip_model = None
 
     def set_hyperparams(self):
         self.save_dir = self.config["Results"]["save_dir"]
@@ -460,6 +462,16 @@ class FrontEnd(mp.Process):
                 cv2.imwrite(render_semantic_path, cv2.cvtColor(img_label, cv2.COLOR_RGB2BGR))
                 semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{cur_frame_idx:04d}.png")
                 cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
+            elif Semantic_Config.mode == "CLIP":
+                feature_map = render_pkg["feature_map"]
+                render_shape = feature_map.shape
+                resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
+                                                    size= Semantic_Config.render_size,
+                                                    mode="bilinear", align_corners=True).squeeze(0))
+                raise NotImplementedError
+            elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
+                # raise NotImplementedError
+                pass
             else:
                 raise NotImplementedError
         debug(f"Saved render: {cur_frame_idx}")
@@ -472,7 +484,7 @@ class FrontEnd(mp.Process):
         self.gaussians.save_ply(path=os.path.join(ckpts_dir, f"gaussian_kf_{text}.ply"))
         
         if Semantic_Config.enable:
-            if Semantic_Config.mode == "SAM2":
+            if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
                 decoder_state_dict = self.cnn_decoder.state_dict()
                 torch.save(decoder_state_dict, os.path.join(ckpts_dir,  f"decoder_{text}.pth"))
         
@@ -487,6 +499,7 @@ class FrontEnd(mp.Process):
             
 
     def run(self):
+        torch.set_num_threads(2)
         cur_frame_idx = 0
         projection_matrix = getProjectionMatrix2(
             znear=0.01,
@@ -518,6 +531,9 @@ class FrontEnd(mp.Process):
             if self.frontend_queue.empty():
                 tic.record()
                 if cur_frame_idx >= len(self.dataset):
+                    if self.requested_keyframe:
+                        time.sleep(0.5)
+                        continue
                     if self.save_results: 
                         self.save_state_dict("final")
                     break
@@ -582,6 +598,10 @@ class FrontEnd(mp.Process):
                 )
                 if self.single_thread:
                     create_kf = check_time and create_kf
+                
+                if cur_frame_idx == len(self.dataset) - 1: # fix for last frame
+                    create_kf = True  
+
                 if create_kf:
                     self.current_window, removed = self.add_to_window(
                         cur_frame_idx,
@@ -636,7 +656,7 @@ class FrontEnd(mp.Process):
                         iteration="before_opt",
                         depth_l1=not self.monocular
                     )
-                    if Semantic_Config.eval_segmentation:
+                    if Semantic_Config.eval_segmentation and Semantic_Config.mode == "GT_Label":
                         seg_result = eval_segmentation(
                             self.cameras,
                             self.dataset,

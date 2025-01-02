@@ -17,7 +17,7 @@ from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_mapping
 
 from utils.camera_utils import Camera
-from utils.semantic_utils import build_decoder, label_loss
+from utils.semantic_utils import build_decoder, label_loss, create_dense_feature
 from utils.semantic_setting import Semantic_Config
 
 class BackEnd(mp.Process):
@@ -49,7 +49,7 @@ class BackEnd(mp.Process):
         self.keyframe_optimizers = None
         
         # CNN Decoder to upsample semantic features
-        if Semantic_Config.mode == "SAM2":
+        if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
             self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
 
     def set_hyperparams(self):
@@ -401,6 +401,7 @@ class BackEnd(mp.Process):
         return gaussian_split
 
     def map_semantic(self, iters=1, window_size=2):
+        start_time = time.time()
         if not Semantic_Config.enable:
             return
         
@@ -408,25 +409,46 @@ class BackEnd(mp.Process):
             return
         
         semantic_window = self.current_window[:window_size]
-        viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
         
-        gt_label_stack = []
-        gt_feature_stack = []
-        if Semantic_Config.mode == "GT_Label":
+        # NOTE random select frames to add into the semantic window
+        if len(self.viewpoints) > 4:
+            random_idx_stack = []
+            for cam_idx, viewpoint in self.viewpoints.items():
+                if cam_idx in semantic_window:
+                    continue
+                random_idx_stack.append(cam_idx)
+            random_select_num = 1
+            semantic_window = semantic_window + random.sample(random_idx_stack, random_select_num)
+               
+        viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
+         
+        tensor_label_stack = []
+        pred_feature_stack = []
+        if Semantic_Config.mode == "GT_Label": # GT label
             for i in range(len(semantic_window)):
                 gt_label_path = self.dataset.get_gt_semantic(semantic_window[i])
-                label_img = cv2.imread(gt_label_path)[:,:,0] # W H
+                label_img = cv2.imread(gt_label_path, cv2.IMREAD_GRAYSCALE) # W H
                 gt_label = torch.tensor(label_img).long().cuda()
-                gt_label_stack.append(gt_label)
+                tensor_label_stack.append(gt_label)
+        elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]: # pred label with feature
+            for i in range(len(semantic_window)):
+                pred_label_path = self.dataset.get_pred_label(semantic_window[i])
+                label_img = cv2.imread(pred_label_path, cv2.IMREAD_GRAYSCALE)
+                pred_label = torch.tensor(label_img).long().cuda()
+                tensor_label_stack.append(pred_label)
+                
+                pred_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
+                pred_feature = torch.load(pred_semantic_path, weights_only=True) 
+                pred_feature_stack.append(pred_feature)
         else:
             if Semantic_Config.preload_semantic:
                 for i in range(len(semantic_window)):
-                    gt_feature_stack.append(self.gt_semantic_stack[semantic_window[i]])
+                    pred_feature_stack.append(self.gt_semantic_stack[semantic_window[i]])
             else:
                 for i in range(len(semantic_window)):
-                    gt_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
-                    gt_feature = torch.load(gt_semantic_path, weights_only=True).cuda()
-                    gt_feature_stack.append(gt_feature)
+                    pred_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
+                    pred_feature = torch.load(pred_semantic_path, weights_only=True).cuda()
+                    pred_feature_stack.append(pred_feature)
     
         semantic_loss = []
         for _ in range(iters):
@@ -436,28 +458,58 @@ class BackEnd(mp.Process):
                 render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background,
                                     flag_semantic=True)
                 feature_map = render_pkg["feature_map"]
-                if Semantic_Config.mode == "SAM2":
-                    fmap_size = Semantic_Config.fmap_size[Semantic_Config.mode]
-                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), fmap_size,
+                if Semantic_Config.mode in ["SAM2", "CLIP"]:
+                    render_size = Semantic_Config.render_size
+                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), render_size,
                                                                 mode="bilinear", align_corners=True).squeeze(0))
-                    gt_feature = gt_feature_stack[cam_idx]
-                    l1_feature = l1_loss(feature_map, gt_feature)
+                    pred_feature = pred_feature_stack[cam_idx]
+                    pred_feature = F.interpolate(pred_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
+                    l1_feature = l1_loss(feature_map, pred_feature)
                     loss_semantic += l1_feature
                     
                 elif Semantic_Config.mode == "GT_Label":
-                    gt_label = gt_label_stack[cam_idx]
+                    gt_label = tensor_label_stack[cam_idx]
                     loss_label = label_loss(feature_map.unsqueeze(0), gt_label.unsqueeze(0))
                     loss_semantic += loss_label
+                elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
+                    # resize the feature map
+                    render_size = Semantic_Config.render_size
+                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), render_size,
+                                                                mode="bilinear", align_corners=True).squeeze(0))
+                    # resize the pred label and feature
+                    pred_label = tensor_label_stack[cam_idx]
+                    pred_feature = pred_feature_stack[cam_idx]
+
+                    pred_dense_feature = create_dense_feature(pred_label, pred_feature, 
+                                                              Semantic_Config.semantic_dim[Semantic_Config.mode])
+                    pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
+                    
+                    mask = (pred_label != 0).float().unsqueeze(0)
+                    mask = F.interpolate(mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
+
+                    cv2.imwrite(f"results/test/vis/mask_{cam_idx:04d}.png", (mask*255).detach().cpu().numpy().astype("uint8"))
+                    
+                    # Create a mask to ignore background (label=0) regions
+                    pred_dense_feature = pred_dense_feature.detach() # no grad in pred_dense_feature
+                    feature_map[:, ~mask] = 0
+                    pred_dense_feature[:, ~mask] = 0
+                    l1_feature = l1_loss(feature_map, pred_dense_feature)
+                    loss_semantic += l1_feature
                 else:
                     raise NotImplementedError
             semantic_loss.append(loss_semantic.item())
+            if len(semantic_loss) % 10 == 0:
+                eval_loss = semantic_loss[-10:]
+                Log(f"semantic loss: {sum(eval_loss)/10/len(semantic_window)}")
             loss_semantic.backward()
             with torch.no_grad():
-                if Semantic_Config.mode == "SAM2":
+                if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
                     self.cnn_decoder_optimizer.step()
                     self.cnn_decoder_optimizer.zero_grad()
                 self.gaussians.semantic_optimizer.step()
                 self.gaussians.semantic_optimizer.zero_grad()
+            
+        debug(f"semantic mapping time: {time.time()-start_time:.1f}")
                 
     def color_refinement(self):
         Log("Starting color refinement")
@@ -508,13 +560,14 @@ class BackEnd(mp.Process):
             tag = "sync_backend"
         state_dict_cpu = None
         if Semantic_Config.enable:
-            if Semantic_Config.mode == "SAM2":
+            if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
                 decoder_state_dict = self.cnn_decoder.state_dict()
                 state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
         msg = [tag, self.gaussians.get_state_dict(), self.occ_aware_visibility, keyframes, state_dict_cpu]
         self.frontend_queue.put(msg)
 
     def run(self):
+        torch.set_num_threads(2)
         while True:
             if self.backend_queue.empty():
                 if self.pause:
@@ -575,7 +628,7 @@ class BackEnd(mp.Process):
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
 
                     GBA_flag = False
-                    iter_per_kf = self.mapping_itr_num if self.single_thread else 10
+                    iter_per_kf = self.mapping_itr_num if self.single_thread else 20
                     if not self.initialized:
                         if len(self.current_window) == self.window_size:
                             GBA_flag = True
@@ -598,4 +651,3 @@ class BackEnd(mp.Process):
             self.backend_queue.get()
         while not self.frontend_queue.empty():
             self.frontend_queue.get()
-        return
