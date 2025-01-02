@@ -25,6 +25,7 @@ from utils.logging_utils import Log
 from utils.semantic_setting import Semantic_Config
 from utils.eval_segmentation import SegmentationMetric
 from diff_gaussian_rasterization import get_semantic_channels
+from utils.semantic_utils import build_decoder
 
 def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ## Plot
@@ -216,12 +217,21 @@ def save_gaussians(gaussians, name, iteration, final=False):
         )
     gaussians.save_ply(point_cloud_path + "_point_cloud.ply")
 
-def eval_segmentation(frames, dataset, gaussians, pipe, background, save_dir=None):
+def eval_segmentation(frames, dataset, gaussians, pipe, background, save_dir=None, decoder_state_dict=None, clip_text_feature=None):
     seg_metric = SegmentationMetric(nclass=get_semantic_channels())
     if save_dir is not None:
         semantic_class_root_dir = os.path.join(save_dir, "render", 'eval_semantic_class')
         os.makedirs(semantic_class_root_dir, exist_ok=True)
-            
+    
+    if Semantic_Config.mode == "Grounding_Dino":
+        cnn_decoder, _ = build_decoder(mode="eval")
+        if decoder_state_dict is not None:
+            cnn_decoder.load_state_dict(decoder_state_dict)
+        else:
+            raise ValueError("Decoder state dict is None.")
+        if clip_text_feature is None:
+            raise ValueError("Clip text feature is None.")
+        
     for idx in range(len(frames)):
         frame = frames[idx]
         
@@ -231,13 +241,38 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background, save_dir=Non
             pred_label = torch.argmax(feature_map, dim=0).detach().cpu().numpy().astype(np.uint8)
             
             gt_label_path = dataset.get_gt_semantic(idx)
-            gt_label = cv2.imread(gt_label_path)[:,:,0].astype(np.uint8)
+            gt_label = cv2.imread(gt_label_path, cv2.IMREAD_GRAYSCALE).astype(np.uint8)
             seg_metric.update(pred_label, gt_label)
             
             if save_dir is not None:    
                 semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{idx:04d}.png")
                 cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
-
+                
+        elif Semantic_Config.mode == "Grounding_Dino":
+            render_pkg = render(frame, gaussians, pipe, background, flag_semantic=True)
+            feature_map = render_pkg["feature_map"]
+            feature_map = cnn_decoder(feature_map)
+            pred_ssim = feature_map.permute(1, 2, 0) @ clip_text_feature.T
+            threshold = 0.6
+            black_mask = (pred_ssim < threshold).all(dim=-1)
+            pred_label = (torch.argmax(pred_ssim, dim=-1) + 1) # W x H, 0 is background
+            pred_label[black_mask] = 0 # 0 is background
+            pred_label = pred_label.detach().cpu().numpy().astype(np.uint8)
+            
+            gt_label_path = dataset.get_gt_semantic(idx)
+            gt_label = cv2.imread(gt_label_path, cv2.IMREAD_GRAYSCALE).astype(np.uint8)
+            
+            # TODO fix
+            synonyms_id_dict = {98:40, 97:12}
+            for key, value in synonyms_id_dict.items():
+                pred_label[pred_label == key] = value
+                gt_label[gt_label == key] = value
+            
+            seg_metric.update(pred_label, gt_label)
+            if save_dir is not None:    
+                semantic_class_path = os.path.join(semantic_class_root_dir, f"pred_semantic_class_{idx:04d}.png")
+                cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
+            
     pixel_acc, mIoU = seg_metric.get()
     Log(
         f'pixel_acc: {pixel_acc:.3f}, ' + f'mIoU: {mIoU:.3f}',
