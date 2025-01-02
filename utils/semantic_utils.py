@@ -115,7 +115,7 @@ def generate_colored_mask(heatmaps, thresholded=95):
 # heatmaps = [heatmap1, heatmap2, heatmap3, heatmap4]
 # generate_colored_mask(heatmaps)
 
-def build_decoder(mode='train', lr=0.0005):
+def build_decoder(mode='train', lr=0.001):
     pred_feature_dim = Semantic_Config.semantic_dim[Semantic_Config.mode]
     semantic_feature_dim = get_semantic_channels()
     cnn_decoder, cnn_decoder_optimizer = None, None
@@ -157,3 +157,21 @@ def load_seg_map(filepath, W, H):
     ], axis=0)
 
     return dense_seg_map
+
+@torch.no_grad()
+def create_dense_feature(label_map, feature, dim=512):
+    """
+        return dense feature map with shape (D, H, W)
+    """
+    clip_features = feature["text_feature"]
+    # clip_features = feature["image_feature"]
+    clip_features /= clip_features.norm(dim=-1, keepdim=True)
+    clip_features = clip_features.to(torch.float32).cuda() # N D
+    
+    dense_feature = torch.zeros((label_map.shape[0], label_map.shape[1], dim), dtype=torch.float32).cuda()
+    for i in range(clip_features.shape[0]):
+        dense_feature[label_map == i+1] = clip_features[i]
+    return dense_feature.permute(2, 0, 1)
+
+
+
