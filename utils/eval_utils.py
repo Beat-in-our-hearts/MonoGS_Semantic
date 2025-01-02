@@ -253,7 +253,7 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background, save_dir=Non
             feature_map = render_pkg["feature_map"]
             feature_map = cnn_decoder(feature_map)
             pred_ssim = feature_map.permute(1, 2, 0) @ clip_text_feature.T
-            threshold = 0.6
+            threshold = 0.4
             black_mask = (pred_ssim < threshold).all(dim=-1)
             pred_label = (torch.argmax(pred_ssim, dim=-1) + 1) # W x H, 0 is background
             pred_label[black_mask] = 0 # 0 is background

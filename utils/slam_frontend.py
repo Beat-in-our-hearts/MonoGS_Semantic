@@ -598,6 +598,10 @@ class FrontEnd(mp.Process):
                 )
                 if self.single_thread:
                     create_kf = check_time and create_kf
+                
+                if cur_frame_idx == len(self.dataset) - 1: # fix for last frame
+                    create_kf = True  
+
                 if create_kf:
                     self.current_window, removed = self.add_to_window(
                         cur_frame_idx,

@@ -18,7 +18,7 @@ class Semantic_Config_DataClass:
     
     semantic_window:int = 2
     semantic_init_iter:int = 20 # gt label 5, , other 20+
-    semantic_iter:int = 4 
+    semantic_iter:int = 3 
     
     semantic_dim: Dict[str, int] = field(default_factory=lambda: {
         "LSeg": 512,
@@ -41,7 +41,7 @@ class Semantic_Config_DataClass:
         "SAM_CLIP": "florence2_sam2", # fusion_features_0000.pt, mask_auto_label_0000.png
         "Grounding_Dino": "grounding_dino", # grounding_dino_feature_0000.pt, pred_label_0000.png
     })
-    render_size = [170, 300]
+    render_size = [360, 480]
     
     Debug:bool = False
     log_file:str = "results/slam.log"

@@ -409,8 +409,19 @@ class BackEnd(mp.Process):
             return
         
         semantic_window = self.current_window[:window_size]
-        viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
         
+        # NOTE random select frames to add into the semantic window
+        if len(self.viewpoints) > 4:
+            random_idx_stack = []
+            for cam_idx, viewpoint in self.viewpoints.items():
+                if cam_idx in semantic_window:
+                    continue
+                random_idx_stack.append(cam_idx)
+            random_select_num = 1
+            semantic_window = semantic_window + random.sample(random_idx_stack, random_select_num)
+               
+        viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
+         
         tensor_label_stack = []
         pred_feature_stack = []
         if Semantic_Config.mode == "GT_Label": # GT label
@@ -471,12 +482,18 @@ class BackEnd(mp.Process):
 
                     pred_dense_feature = create_dense_feature(pred_label, pred_feature, 
                                                               Semantic_Config.semantic_dim[Semantic_Config.mode])
-                    mask = (pred_label != 0).float().unsqueeze(0).expand_as(pred_dense_feature)
                     pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
-                    mask = F.interpolate(mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
+                    
+                    mask = (pred_label != 0).float().unsqueeze(0)
+                    mask = F.interpolate(mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
+
+                    cv2.imwrite(f"results/test/vis/mask_{cam_idx:04d}.png", (mask*255).detach().cpu().numpy().astype("uint8"))
                     
                     # Create a mask to ignore background (label=0) regions
-                    l1_feature = l1_loss(feature_map * mask, pred_dense_feature * mask)
+                    pred_dense_feature = pred_dense_feature.detach() # no grad in pred_dense_feature
+                    feature_map[:, ~mask] = 0
+                    pred_dense_feature[:, ~mask] = 0
+                    l1_feature = l1_loss(feature_map, pred_dense_feature)
                     loss_semantic += l1_feature
                 else:
                     raise NotImplementedError
