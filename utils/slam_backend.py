@@ -51,6 +51,8 @@ class BackEnd(mp.Process):
         # CNN Decoder to upsample semantic features
         if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
             self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
+            if Semantic_Config.mode == "Grounding_Dino":
+                self.cnn_decoder.load_state_dict(torch.load("checkpoints/decoder_128_512.pth"))
 
     def set_hyperparams(self):
         self.save_results = self.config["Results"]["save_results"]
@@ -628,7 +630,7 @@ class BackEnd(mp.Process):
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
 
                     GBA_flag = False
-                    iter_per_kf = self.mapping_itr_num if self.single_thread else 20
+                    iter_per_kf = self.mapping_itr_num if self.single_thread else 30
                     if not self.initialized:
                         if len(self.current_window) == self.window_size:
                             GBA_flag = True
