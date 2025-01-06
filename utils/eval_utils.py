@@ -26,6 +26,7 @@ from utils.semantic_setting import Semantic_Config
 from utils.eval_segmentation import SegmentationMetric
 from diff_gaussian_rasterization import get_semantic_channels
 from utils.semantic_utils import build_decoder
+from imgviz import label_colormap
 
 def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     ## Plot
@@ -272,6 +273,9 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background, save_dir=Non
             if save_dir is not None:    
                 semantic_class_path = os.path.join(semantic_class_root_dir, f"pred_semantic_class_{idx:04d}.png")
                 cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
+                vis_semantic_class_path = os.path.join(semantic_class_root_dir, f"vis_pred_semantic_class_{idx:04d}.jpg")
+                vis_gt_label = label_colormap()[pred_label]
+                cv2.imwrite(vis_semantic_class_path, cv2.cvtColor(vis_gt_label, cv2.COLOR_RGB2BGR))
             
     pixel_acc, mIoU = seg_metric.get()
     Log(

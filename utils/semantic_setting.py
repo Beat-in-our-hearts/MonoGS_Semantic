@@ -9,6 +9,7 @@ class Semantic_Config_DataClass:
     mode_list: List[str] = field(default_factory=lambda: ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino"])
     mode:str = "Grounding_Dino"
     enable:bool = True
+    use_lseg:bool = True
     wandb_enable:bool = False
     
     eval_segmentation:bool = True
@@ -17,7 +18,7 @@ class Semantic_Config_DataClass:
     semantic_lr_scale:float = 5.0
     
     semantic_window:int = 2
-    semantic_init_iter:int = 20 # gt label 5, , other 20+
+    semantic_init_iter:int = 5 # gt label 5, , other 20+
     semantic_iter:int = 3 
     
     semantic_dim: Dict[str, int] = field(default_factory=lambda: {

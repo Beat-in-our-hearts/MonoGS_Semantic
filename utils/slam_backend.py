@@ -51,6 +51,8 @@ class BackEnd(mp.Process):
         # CNN Decoder to upsample semantic features
         if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
             self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
+            if Semantic_Config.mode == "Grounding_Dino":
+                self.cnn_decoder.load_state_dict(torch.load("checkpoints/decoder_128_512.pth"))
 
     def set_hyperparams(self):
         self.save_results = self.config["Results"]["save_results"]
@@ -424,6 +426,7 @@ class BackEnd(mp.Process):
          
         tensor_label_stack = []
         pred_feature_stack = []
+        lseg_label_stack = []
         if Semantic_Config.mode == "GT_Label": # GT label
             for i in range(len(semantic_window)):
                 gt_label_path = self.dataset.get_gt_semantic(semantic_window[i])
@@ -440,6 +443,13 @@ class BackEnd(mp.Process):
                 pred_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
                 pred_feature = torch.load(pred_semantic_path, weights_only=True) 
                 pred_feature_stack.append(pred_feature)
+                
+                # NOTE lseg label 360 x 480
+                if Semantic_Config.use_lseg:
+                    pred_lseg_label_path = self.dataset.get_pred_lseg_label(semantic_window[i])
+                    lseg_label_img = cv2.imread(pred_lseg_label_path, cv2.IMREAD_GRAYSCALE)
+                    lseg_label = torch.tensor(lseg_label_img).long().cuda()
+                    lseg_label_stack.append(lseg_label)
         else:
             if Semantic_Config.preload_semantic:
                 for i in range(len(semantic_window)):
@@ -486,7 +496,36 @@ class BackEnd(mp.Process):
                     
                     mask = (pred_label != 0).float().unsqueeze(0)
                     mask = F.interpolate(mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
+                    
+                    # TODO fussion lseg feature for wall and floor
+                    # force overwrite
 
+                    if Semantic_Config.use_lseg:
+                        pred_dense_feature = pred_dense_feature.permute(1, 2, 0)
+                        lseg_mask = torch.zeros(pred_dense_feature.shape[:2], dtype=torch.bool).cuda()
+                        pred_lseg_label = lseg_label_stack[cam_idx]
+                        pred_lseg_word_dict = pred_feature["sp_word_features"] # {"wall": .., "floor": ..}
+                        word_info_dict = {
+                            "wall": {"word_id":1, "force_mask":False},
+                            "floor": {"word_id":4, "force_mask":True},
+                            "lamp": {"word_id":37, "force_mask":True},
+                            "ceiling": {"word_id":6, "force_mask":False},
+                        }
+                        for word, word_feature in pred_lseg_word_dict.items():
+                            word_info = word_info_dict[word]
+                            word_id = word_info["word_id"]
+                            force_mask_enable = word_info["force_mask"]
+                            if force_mask_enable:
+                                force_mask = pred_lseg_label == word_id
+                                pred_dense_feature[force_mask] = word_feature
+                                lseg_mask = torch.logical_or(lseg_mask, force_mask)
+                            else:
+                                soft_mask = (pred_lseg_label == word_id) & (~mask)
+                                pred_dense_feature[soft_mask] = word_feature
+                                lseg_mask = torch.logical_or(lseg_mask, soft_mask)
+                        pred_dense_feature = pred_dense_feature.permute(2, 0, 1)
+                        mask = torch.logical_or(mask, lseg_mask)
+                    
                     cv2.imwrite(f"results/test/vis/mask_{cam_idx:04d}.png", (mask*255).detach().cpu().numpy().astype("uint8"))
                     
                     # Create a mask to ignore background (label=0) regions
@@ -628,7 +667,7 @@ class BackEnd(mp.Process):
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
 
                     GBA_flag = False
-                    iter_per_kf = self.mapping_itr_num if self.single_thread else 20
+                    iter_per_kf = self.mapping_itr_num if self.single_thread else 30
                     if not self.initialized:
                         if len(self.current_window) == self.window_size:
                             GBA_flag = True
