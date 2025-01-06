@@ -393,6 +393,8 @@ def test(args):
     print("scales", scales)
     print("test rgb dir", args.test_rgb_dir)
     print("outdir", args.outdir)
+    os.makedirs(os.path.join(args.outdir, "vis"), exist_ok=True)
+    os.makedirs(os.path.join(args.outdir, "lseg_label"), exist_ok=True)
     for i, (image, dst) in enumerate(tbar):
         """
         if "Replica_Dataset" in args.test_rgb_dir and not (i in train_ids or i in test_ids):
@@ -444,7 +446,13 @@ def test(args):
             # mask = utils.get_mask_pallete(predict - 1, args.dataset)
             mask = utils.get_mask_pallete(predict - 1, 'detail')
             outname = os.path.splitext(impath)[0] + ".png"
-            mask.save(os.path.join(outdir, outname))
+            mask.save(os.path.join(outdir, "vis", outname))
+            
+            predict_name = os.path.splitext(impath)[0] + "_semantic.png"
+            Image.fromarray(predict[0].astype(np.uint8)).save(os.path.join(outdir, "lseg_label", predict_name))
+            
+            continue
+            # np.save(os.path.join(outdir, predict_name), predict)
 
             # vis from accumulation of prediction
             mask = torch.tensor(np.array(mask.convert("RGB"), "f")) / 255.0
@@ -454,7 +462,7 @@ def test(args):
             vis2 = vis_img * 0.4 + mask * 0.6
             vis3 = mask
             vis = torch.cat([vis1, vis2, vis3], dim=1)
-            Image.fromarray((vis.cpu().numpy() * 255).astype(np.uint8)).save(os.path.join(outdir, outname + "_vis.png"))
+            Image.fromarray((vis.cpu().numpy() * 255).astype(np.uint8)).save(os.path.join(outdir, "vis", outname + "_vis.png"))
 
             # new_palette = get_new_pallete(len(labels))
             # seg, patches = get_new_mask_pallete(predict, new_palette, labels=labels)
@@ -466,7 +474,7 @@ def test(args):
             plt.imshow(seg)
             #plt.legend(handles=patches)
             plt.legend(handles=patches, prop={'size': 8}, ncol=4)
-            plt.savefig(os.path.join(outdir, outname + "_legend.png"), format="png", dpi=300, bbox_inches="tight")
+            plt.savefig(os.path.join(outdir, "vis", outname + "_legend.png"), format="png", dpi=300, bbox_inches="tight")
             plt.clf()
             plt.close()
 
@@ -502,14 +510,14 @@ def test(args):
                 del f_samples
                 torch.save({"pca": pca, "feature_pca_mean": feature_pca_mean, "feature_pca_components": feature_pca_components,
                             "feature_pca_postprocess_sub": feature_pca_postprocess_sub, "feature_pca_postprocess_div": feature_pca_postprocess_div},
-                           os.path.join(outdir, "pca_dict.pt"))
+                           os.path.join(outdir, "vis", "pca_dict.pt"))
 
             #print("start imgsave")
             start = time.time()
             vis_feature = (fmap.permute(0, 2, 3, 1).reshape(-1, fmap.shape[1]) - feature_pca_mean[None, :]) @ feature_pca_components.T
             vis_feature = (vis_feature - feature_pca_postprocess_sub) / feature_pca_postprocess_div
             vis_feature = vis_feature.clamp(0.0, 1.0).float().reshape((fmap.shape[2], fmap.shape[3], 3)).cpu()
-            Image.fromarray((vis_feature.cpu().numpy() * 255).astype(np.uint8)).save(os.path.join(outdir, outname + "_feature_vis.png"))
+            Image.fromarray((vis_feature.cpu().numpy() * 255).astype(np.uint8)).save(os.path.join(outdir, "vis", outname + "_feature_vis.png"))
             #print(time.time() - start)
             #print("done imgsave")
 

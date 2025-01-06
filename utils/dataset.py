@@ -427,6 +427,7 @@ class ReplicaDataset_Semantic(MonocularDataset):
             self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/mask_auto_label_*.png"))
         elif Semantic_Config.mode == "Grounding_Dino":
             self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/pred_label_*.png"))
+            self.pred_lseg_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/lseg_label/*.png"))
         print("Number of pred_semantic: ", len(self.pred_semantic_paths))
 
     def get_pred_semantic(self, idx):
@@ -442,6 +443,10 @@ class ReplicaDataset_Semantic(MonocularDataset):
             return self.pred_label_paths[idx]
         else:
             return None
+        
+    def get_pred_lseg_label(self, idx):
+        assert len(self.pred_lseg_label_paths) > 0
+        return self.pred_lseg_label_paths[idx]
 
 
 class EurocDataset(StereoDataset):
