@@ -401,6 +401,31 @@ class TUMDataset(MonocularDataset):
         self.color_paths = parser.color_paths
         self.depth_paths = parser.depth_paths
         self.poses = parser.poses
+        
+class TUMDataset_Semantic(MonocularDataset):
+    def __init__(self, args, path, config):
+        super().__init__(args, path, config)
+        dataset_path = config["Dataset"]["dataset_path"]
+        parser = TUMParser(dataset_path)
+        self.num_imgs = parser.n_img
+        self.color_paths = parser.color_paths
+        self.depth_paths = parser.depth_paths
+        self.poses = parser.poses
+        
+        self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.pt"))
+        if Semantic_Config.mode == "Grounding_Dino":
+            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/pred_label_*.png"))
+        else:
+            raise NotImplementedError
+        
+    def get_pred_semantic(self, idx):
+        return self.pred_semantic_paths[idx]
+    
+    def get_pred_label(self, idx):
+        return self.pred_label_paths[idx]
+    
+    def get_gt_semantic(self, idx):
+        raise NotImplementedError
 
 class ReplicaDataset(MonocularDataset):
     def __init__(self, args, path, config):
@@ -556,6 +581,8 @@ class RealsenseDataset(BaseDataset):
 def load_dataset(args, path, config):
     if config["Dataset"]["type"] == "tum":
         return TUMDataset(args, path, config)
+    elif config["Dataset"]["type"] == "tum_semantic":
+        return TUMDataset_Semantic(args, path, config)
     elif config["Dataset"]["type"] == "replica":
         return ReplicaDataset(args, path, config)
     elif config["Dataset"]["type"] == "replica_semantic":

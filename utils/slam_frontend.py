@@ -65,6 +65,8 @@ class FrontEnd(mp.Process):
             self.cnn_decoder, _ = build_decoder(mode='eval')
             
         self.clip_model = None
+        self.query_feature = None
+        self.query_name = None
 
     def set_hyperparams(self):
         self.save_dir = self.config["Results"]["save_dir"]
@@ -470,8 +472,17 @@ class FrontEnd(mp.Process):
                                                     mode="bilinear", align_corners=True).squeeze(0))
                 raise NotImplementedError
             elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
-                # raise NotImplementedError
-                pass
+                feature_map = render_pkg["feature_map"]
+                feature_map = self.cnn_decoder(feature_map)
+                pred_ssim = feature_map.permute(1, 2, 0) @ self.query_feature.T
+                threshold = 0.4
+                black_mask = (pred_ssim < threshold).all(dim=-1)
+                pred_label = (torch.argmax(pred_ssim, dim=-1) + 1) # W x H, 0 is background
+                pred_label[black_mask] = 0 # 0 is background
+                pred_label = pred_label.detach().cpu().numpy().astype(np.uint8)
+                cv2.imwrite(os.path.join(semantic_root_dir, f"semantic_class_{cur_frame_idx:04d}.png"), pred_label)
+                img_label = label_colormap()[pred_label]
+                cv2.imwrite(os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png"), cv2.cvtColor(img_label, cv2.COLOR_RGB2BGR))
             else:
                 raise NotImplementedError
         debug(f"Saved render: {cur_frame_idx}")
@@ -535,6 +546,10 @@ class FrontEnd(mp.Process):
                         time.sleep(0.5)
                         continue
                     if self.save_results: 
+                        if Semantic_Config.re_render:
+                            print("Re-rendering all frames")
+                            for idx in range(len(self.dataset)):
+                                self.save_render(idx, self.cameras[idx])
                         self.save_state_dict("final")
                     break
 

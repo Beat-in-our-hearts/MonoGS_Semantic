@@ -93,13 +93,23 @@ class SLAM:
         self.frontend.clip_model, _ = clip.load("ViT-B/32", device=self.frontend.device, 
                                         jit=True, download_root="/tmp")
         self.frontend.clip_model.eval()
-        with open("gui/info_semantic.json", "r") as f:
-            info_semantic = json.load(f) 
-        class_names = [item["name"] for item in info_semantic["classes"]]
+        
+        # with open("gui/info_semantic.json", "r") as f:
+        #     info_semantic = json.load(f) 
+        # class_names = [item["name"] for item in info_semantic["classes"]]
+        
+        class_names = [
+                    "toy", "book", "pegboard", "bottle", "bin", "chair", "desk", 
+                    "pen", "scissors", "globe", "cup", "snacks", "plate", 
+                    "keyboard", "mouse", "display", "stapler", "tools", "bear", "spoon"
+                ]
         gt_text_tokens = clip.tokenize(class_names).to(self.frontend.device)
         gt_text_features = self.frontend.clip_model.encode_text(gt_text_tokens)
         gt_text_features /= gt_text_features.norm(dim=-1, keepdim=True)
         self.gt_text_features = gt_text_features.to(torch.float32)
+        
+        self.frontend.query_feature = self.gt_text_features
+        self.frontend.query_name = class_names
         
         self.backend.dataset = self.dataset
         self.backend.gaussians = self.gaussians
@@ -164,7 +174,10 @@ class SLAM:
                 depth_l1=not self.monocular,
             )
             if Semantic_Config.eval_segmentation:
-                cnn_decoder_state_dict = self.frontend.cnn_decoder.state_dict()
+                if Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
+                    cnn_decoder_state_dict = self.frontend.cnn_decoder.state_dict()
+                else:
+                    cnn_decoder_state_dict = None
                 seg_result = eval_segmentation(
                             self.frontend.cameras,
                             self.dataset,
@@ -274,7 +287,6 @@ if __name__ == "__main__":
     if args.headless:
         config["Results"]["save_results"] = True
         config["Results"]["use_gui"] = False
-        config["Results"]["use_wandb"] = False
         Log("Running MonoGS in Headless Mode")
         Log("Following config will be overriden")
     Log(f"\tsave_results={config['Results']['save_results']}")

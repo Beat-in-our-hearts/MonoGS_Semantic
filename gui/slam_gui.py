@@ -103,9 +103,16 @@ class SLAM_GUI:
                 clip_model, _ = clip.load("ViT-B/32", device=self.device, 
                                         jit=True, download_root="/tmp")
                 clip_model.eval()
-                with open("gui/info_semantic.json", "r") as f:
-                    info_semantic = json.load(f) 
-                class_names = [item["name"] for item in info_semantic["classes"]]
+                
+                # with open("gui/info_semantic.json", "r") as f:
+                #     info_semantic = json.load(f) 
+                # class_names = [item["name"] for item in info_semantic["classes"]]
+                
+                class_names = [
+                    "toy", "book", "pegboard", "bottle", "bin", "chair", "desk", 
+                    "pen", "scissors", "globe", "cup", "snacks", "plate", 
+                    "keyboard", "mouse", "display", "stapler", "tools", "bear", "spoon"
+                ]
                 gt_text_tokens = clip.tokenize(class_names).to(self.device)
                 gt_text_features = clip_model.encode_text(gt_text_tokens)
                 gt_text_features /= gt_text_features.norm(dim=-1, keepdim=True)

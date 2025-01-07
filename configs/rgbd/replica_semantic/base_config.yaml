@@ -5,12 +5,12 @@ Results:
   save_trj_kf_intv: 30
   use_gui: True
   eval_rendering: False
-  use_wandb: False
+  use_wandb: True
 
 Dataset:
   sensor_type: 'depth'
-  pcd_downsample: 64
-  pcd_downsample_init: 32
+  pcd_downsample: 16
+  pcd_downsample_init: 8
   adaptive_pointsize: True
   point_size: 0.05
   type: 'replica_semantic'
@@ -55,7 +55,7 @@ Training:
 
   kf_translation: 0.04
   kf_min_translation: 0.02 # 0.02
-  kf_overlap: 0.8
+  kf_overlap: 0.9
   prune_mode: 'slam'
   spherical_harmonics: False
   lr:
