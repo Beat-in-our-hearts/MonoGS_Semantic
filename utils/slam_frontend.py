@@ -428,7 +428,7 @@ class FrontEnd(mp.Process):
                 .numpy()
             )
         
-        render_rgb_path = os.path.join(rgb_root_dir, f"rgb_{cur_frame_idx:04d}.png")
+        render_rgb_path = os.path.join(rgb_root_dir, f"rgb_{cur_frame_idx:04d}.jpg")
         cv2.imwrite(render_rgb_path, cv2.cvtColor(render_rgb, cv2.COLOR_RGB2BGR))
         
         render_depth = (render_depth * self.depth_scale).cpu().detach().numpy().astype(np.uint16)
@@ -448,7 +448,7 @@ class FrontEnd(mp.Process):
                 sam2_pca = apply_pca_colormap(resize_feature_map.permute(1, 2, 0)).detach().cpu().numpy() # H W C
                 img_sam2_pca = (sam2_pca*255).astype(np.uint8)
                 img_sam2_pca = cv2.resize(img_sam2_pca, (render_shape[2], render_shape[1]))
-                render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
+                render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.jpg")
                 cv2.imwrite(render_semantic_path, img_sam2_pca)
             elif Semantic_Config.mode == "GT_Label":
                 semantic_class_root_dir = os.path.join(self.save_dir, "render", 'semantic_class')
@@ -458,7 +458,7 @@ class FrontEnd(mp.Process):
                 pred_label = torch.argmax(feature_map, dim=0).detach().cpu().numpy()
                 img_label = label_colormap()[pred_label]
                 
-                render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.png")
+                render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.jpg")
                 cv2.imwrite(render_semantic_path, cv2.cvtColor(img_label, cv2.COLOR_RGB2BGR))
                 semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{cur_frame_idx:04d}.png")
                 cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
