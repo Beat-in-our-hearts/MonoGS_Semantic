@@ -9,7 +9,7 @@ class Semantic_Config_DataClass:
     mode_list: List[str] = field(default_factory=lambda: ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino"])
     mode:str = "Grounding_Dino"
     enable:bool = True
-    use_lseg:bool = True
+    use_lseg:bool = False
     wandb_enable:bool = False
     
     eval_segmentation:bool = True
