@@ -153,26 +153,26 @@ class Camera(nn.Module):
         img_grad_intensity = torch.sqrt(gray_grad_v**2 + gray_grad_h**2)
 
         # TODO
-        if "replica" in config["Dataset"]["type"]:
-            row, col = 32, 32
-            multiplier = edge_threshold
-            _, h, w = self.original_image.shape
-            for r in range(row):
-                for c in range(col):
-                    block = img_grad_intensity[
-                        :,
-                        r * int(h / row) : (r + 1) * int(h / row),
-                        c * int(w / col) : (c + 1) * int(w / col),
-                    ]
-                    th_median = block.median()
-                    block[block > (th_median * multiplier)] = 1
-                    block[block <= (th_median * multiplier)] = 0
-            self.grad_mask = img_grad_intensity
-        else:
-            median_img_grad_intensity = img_grad_intensity.median()
-            self.grad_mask = (
-                img_grad_intensity > median_img_grad_intensity * edge_threshold
-            )
+        # if "replica" in config["Dataset"]["type"]:
+        row, col = 32, 32
+        multiplier = edge_threshold
+        _, h, w = self.original_image.shape
+        for r in range(row):
+            for c in range(col):
+                block = img_grad_intensity[
+                    :,
+                    r * int(h / row) : (r + 1) * int(h / row),
+                    c * int(w / col) : (c + 1) * int(w / col),
+                ]
+                th_median = block.median()
+                block[block > (th_median * multiplier)] = 1
+                block[block <= (th_median * multiplier)] = 0
+        self.grad_mask = img_grad_intensity
+        # else:
+        #     median_img_grad_intensity = img_grad_intensity.median()
+        #     self.grad_mask = (
+        #         img_grad_intensity > median_img_grad_intensity * edge_threshold
+        #     )
 
     def clean(self):
         self.original_image = None
