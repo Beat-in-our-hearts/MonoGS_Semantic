@@ -2,7 +2,7 @@ Results:
   save_results: True
   save_dir: "results"
   save_trj: True
-  save_trj_kf_intv: 40
+  save_trj_kf_intv: 20
   use_gui: True
   eval_rendering: False
   use_wandb: False
@@ -36,11 +36,11 @@ Training:
   pose_window: 8
   edge_threshold: 4
   rgb_boundary_threshold: 0.1
-  alpha: 0.9
+  alpha: 0.4
   kf_translation: 0.04
   kf_min_translation: 0.02
-  kf_overlap: 0.8
-  kf_cutoff: 0.2
+  kf_overlap: 0.9
+  kf_cutoff: 0.4
   prune_mode: 'slam'
   single_thread: True
   spherical_harmonics: False
