@@ -668,7 +668,7 @@ class BackEnd(mp.Process):
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
 
                     GBA_flag = False
-                    iter_per_kf = self.mapping_itr_num if self.single_thread else 10
+                    iter_per_kf = self.mapping_itr_num if self.single_thread else 20
                     if not self.initialized:
                         if len(self.current_window) == self.window_size:
                             GBA_flag = True
