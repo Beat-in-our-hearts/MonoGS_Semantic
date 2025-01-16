@@ -2,7 +2,7 @@ Results:
   save_results: True
   save_dir: "results"
   save_trj: True
-  save_trj_kf_intv: 20
+  save_trj_kf_intv: 15
   use_gui: True
   eval_rendering: False
   use_wandb: False
@@ -37,6 +37,7 @@ Training:
   edge_threshold: 4
   rgb_boundary_threshold: 0.1
   alpha: 0.4
+  map_alpha: 0.2
   kf_translation: 0.04
   kf_min_translation: 0.02
   kf_overlap: 0.9

@@ -14,7 +14,7 @@ class Semantic_Config_DataClass:
     
     eval_segmentation:bool = False
     
-    gs_init_lr:float = 10.0
+    gs_init_lr:float = 5.0
     semantic_lr_scale:float = 5.0
     
     semantic_window:int = 2
@@ -55,8 +55,8 @@ class Semantic_Config_DataClass:
     synchronize:bool = False
     constant_velocity_warmup:int = 5
     
-    ScanNet_Debug = {
-        "map_loss_alpha": 0.8,
+    Semantic_Debug = {
+        "random_select": False,
     }
 
 Semantic_Config = Semantic_Config_DataClass()
