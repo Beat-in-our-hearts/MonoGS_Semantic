@@ -54,6 +54,10 @@ class Semantic_Config_DataClass:
     gui_torch_mp:bool = False
     synchronize:bool = False
     constant_velocity_warmup:int = 5
+    
+    ScanNet_Debug = {
+        "map_loss_alpha": 0.8,
+    }
 
 Semantic_Config = Semantic_Config_DataClass()
 

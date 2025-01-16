@@ -358,7 +358,7 @@ class FrontEnd(mp.Process):
         self.requested_init = True
 
     def sync_backend(self, data):
-        # TODO
+        # fix bug in gpu memory 
         self.gaussians.load_state_dict(data[1])
         occ_aware_visibility = data[2]
         keyframes = data[3]
@@ -413,6 +413,14 @@ class FrontEnd(mp.Process):
         rgb_root_dir = os.path.join(self.save_dir, "render", 'rgb')
         depth_root_dir = os.path.join(self.save_dir, "render", 'depth')
         semantic_root_dir = os.path.join(self.save_dir, "render", 'semantic')
+        
+        track_mask_dir = os.path.join(self.save_dir, "render", 'track_mask')
+        os.makedirs(track_mask_dir, exist_ok=True)
+        
+        grad_mask = viewpoint.grad_mask[0].cpu().numpy().astype(np.uint8) * 255
+        grad_mask_path = os.path.join(track_mask_dir, f"grad_mask_{cur_frame_idx:04d}.png")
+        cv2.imwrite(grad_mask_path, grad_mask)
+        
         os.makedirs(rgb_root_dir, exist_ok=True)
         os.makedirs(depth_root_dir, exist_ok=True)
         if Semantic_Config.enable:
