@@ -37,7 +37,7 @@ Training:
   edge_threshold: 4
   rgb_boundary_threshold: 0.1
   alpha: 0.1
-  map_alpha: 0.4
+  map_alpha: 0.1
   kf_translation: 0.04
   kf_min_translation: 0.02
   kf_overlap: 0.9
