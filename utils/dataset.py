@@ -44,7 +44,33 @@ class ReplicaParser:
             frames.append(frame)
         self.frames = frames
         
+class ScanNetParser:
+    def __init__(self, input_folder):
+        self.input_folder = input_folder
+        self.color_paths = sorted(glob.glob(f"{self.input_folder}/color/rgb*.jpg"))
+        self.depth_paths = sorted(glob.glob(f"{self.input_folder}/inpaint_depth/depth*.png"))
+        self.pose_paths = sorted(glob.glob(f"{self.input_folder}/pose/pose*.txt"))
+        self.n_img = len(self.color_paths)
+        self.load_poses()
+
+    def load_poses(self):
+        # pose_paths, every txt file 4 lines and 4x4 matrix
+        self.poses = []
+        frames = []
         
+        for idx, pose_path in enumerate(self.pose_paths):
+            with open(pose_path, "r") as f:
+                lines = f.readlines()
+                pose = np.array([list(map(float, line.strip().split())) for line in lines])
+                pose = np.linalg.inv(pose)
+                self.poses.append(pose)
+            frame = {
+                "file_path": self.color_paths[idx],
+                "depth_path": self.depth_paths[idx],
+                "transform_matrix": pose.tolist(),
+            }
+            frames.append(frame)
+        self.frames = frames
 
 class TUMParser:
     def __init__(self, input_folder):
@@ -412,6 +438,16 @@ class ReplicaDataset(MonocularDataset):
         self.depth_paths = parser.depth_paths
         self.poses = parser.poses
         
+class ScanNetDataset(MonocularDataset):
+    def __init__(self, args, path, config):
+        super().__init__(args, path, config)
+        dataset_path = config["Dataset"]["dataset_path"]
+        parser = ScanNetParser(dataset_path)
+        self.num_imgs = parser.n_img
+        self.color_paths = parser.color_paths
+        self.depth_paths = parser.depth_paths
+        self.poses = parser.poses
+        
 class ReplicaDataset_Semantic(MonocularDataset):
     def __init__(self, args, path, config):
         super().__init__(args, path, config)
@@ -560,6 +596,8 @@ def load_dataset(args, path, config):
         return ReplicaDataset(args, path, config)
     elif config["Dataset"]["type"] == "replica_semantic":
         return ReplicaDataset_Semantic(args, path, config)
+    elif config["Dataset"]["type"] == "scannet":
+        return ScanNetDataset(args, path, config)
     elif config["Dataset"]["type"] == "euroc":
         return EurocDataset(args, path, config)
     elif config["Dataset"]["type"] == "realsense":

@@ -49,7 +49,7 @@ class BackEnd(mp.Process):
         self.keyframe_optimizers = None
         
         # CNN Decoder to upsample semantic features
-        if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
+        if Semantic_Config.enable and Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
             self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
             if Semantic_Config.mode == "Grounding_Dino":
                 self.cnn_decoder.load_state_dict(torch.load("checkpoints/decoder_128_512.pth"))
@@ -413,15 +413,16 @@ class BackEnd(mp.Process):
         semantic_window = self.current_window[:window_size]
         
         # NOTE random select frames to add into the semantic window
-        if len(self.viewpoints) > 4:
-            random_idx_stack = []
-            for cam_idx, viewpoint in self.viewpoints.items():
-                if cam_idx in semantic_window:
-                    continue
-                random_idx_stack.append(cam_idx)
-            random_select_num = 1
-            semantic_window = semantic_window + random.sample(random_idx_stack, random_select_num)
-               
+        if Semantic_Config.Semantic_Debug["random_select"]:
+            if len(self.viewpoints) > 4:
+                random_idx_stack = []
+                for cam_idx, viewpoint in self.viewpoints.items():
+                    if cam_idx in semantic_window:
+                        continue
+                    random_idx_stack.append(cam_idx)
+                random_select_num = 1
+                semantic_window = semantic_window + random.sample(random_idx_stack, random_select_num)
+                
         viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
          
         tensor_label_stack = []
@@ -667,7 +668,7 @@ class BackEnd(mp.Process):
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map)
 
                     GBA_flag = False
-                    iter_per_kf = self.mapping_itr_num if self.single_thread else 30
+                    iter_per_kf = self.mapping_itr_num if self.single_thread else 20
                     if not self.initialized:
                         if len(self.current_window) == self.window_size:
                             GBA_flag = True
@@ -676,8 +677,7 @@ class BackEnd(mp.Process):
                         else:
                             iter_per_kf = self.mapping_itr_num
 
-                    self.keyframe_optimizers = self.track_update_optimizer(BA_flag=Semantic_Config.Pose_BA_flag,
-                                                                           GBA_flag=GBA_flag)
+                    self.keyframe_optimizers = self.track_update_optimizer(BA_flag=Semantic_Config.Pose_BA_flag, GBA_flag=GBA_flag)
                     
                     self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)

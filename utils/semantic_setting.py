@@ -8,13 +8,13 @@ class Semantic_Config_DataClass:
     save_root_dir:str = "results/replica"
     mode_list: List[str] = field(default_factory=lambda: ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino"])
     mode:str = "Grounding_Dino"
-    enable:bool = True
+    enable:bool = False
     use_lseg:bool = False
     wandb_enable:bool = False
     
-    eval_segmentation:bool = True
+    eval_segmentation:bool = False
     
-    gs_init_lr:float = 10.0
+    gs_init_lr:float = 5.0
     semantic_lr_scale:float = 5.0
     
     semantic_window:int = 2
@@ -54,6 +54,10 @@ class Semantic_Config_DataClass:
     gui_torch_mp:bool = False
     synchronize:bool = False
     constant_velocity_warmup:int = 5
+    
+    Semantic_Debug = {
+        "random_select": False,
+    }
 
 Semantic_Config = Semantic_Config_DataClass()
 

@@ -26,3 +26,8 @@ visualize*
 old*
 screenshots*
 run.sh
+
+
+# temp
+lerf_ovs/
+feature_encoder/

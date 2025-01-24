@@ -152,7 +152,9 @@ class Camera(nn.Module):
         gray_grad_h = gray_grad_h * mask_h
         img_grad_intensity = torch.sqrt(gray_grad_v**2 + gray_grad_h**2)
 
+        # TODO
         if "replica" in config["Dataset"]["type"]:
+            # the mask is sparse
             row, col = 32, 32
             multiplier = edge_threshold
             _, h, w = self.original_image.shape
@@ -168,10 +170,25 @@ class Camera(nn.Module):
                     block[block <= (th_median * multiplier)] = 0
             self.grad_mask = img_grad_intensity
         else:
+            # the mask is denser than replica
             median_img_grad_intensity = img_grad_intensity.median()
             self.grad_mask = (
                 img_grad_intensity > median_img_grad_intensity * edge_threshold
             )
+        
+        if config["Dataset"]["type"] == "scannet":
+            # TODO the edge of image, 20 pixel should be 0
+            pixel_area = 20
+            self.grad_mask[:, :pixel_area, :] = 0
+            self.grad_mask[:, -pixel_area:, :] = 0
+            self.grad_mask[:, :, :pixel_area] = 0
+            self.grad_mask[:, :, -pixel_area:] = 0
+            
+            # TODO fix image, for image padding 20 pixel and depth is zero
+            if self.depth is not None:
+                zero_mask = self.depth == 0
+                zero_mask[pixel_area:-pixel_area, pixel_area:-pixel_area] = 0
+                self.original_image = self.original_image * (~torch.tensor(zero_mask).cuda())
 
     def clean(self):
         self.original_image = None

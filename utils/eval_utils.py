@@ -35,7 +35,6 @@ def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
     traj_est_aligned = trajectory.align_trajectory(
         traj_est, traj_ref, correct_scale=monocular
     )
-
     ## RMSE
     pose_relation = metrics.PoseRelation.translation_part
     data = (traj_ref, traj_est_aligned)
@@ -93,6 +92,10 @@ def eval_ate(frames, kf_ids, save_dir, iterations, final=False, monocular=False)
         pose_est = np.linalg.inv(gen_pose_matrix(kf.R, kf.T))
         pose_gt = np.linalg.inv(gen_pose_matrix(kf.R_gt, kf.T_gt))
 
+        # NOTE fix in scannet dataset
+        if np.isnan(pose_gt).any() or np.isinf(pose_gt).any(): 
+            continue
+        
         trj_id.append(frames[kf_id].uid)
         trj_est.append(pose_est.tolist())
         trj_gt.append(pose_gt.tolist())
