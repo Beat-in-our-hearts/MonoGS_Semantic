@@ -3,7 +3,7 @@ Results:
   save_results: True
   save_dir: "results"
   save_trj: True
-  save_trj_kf_intv: 5
+  save_trj_kf_intv: 15
   use_gui: True
   eval_rendering: False
   use_wandb: False
@@ -11,10 +11,10 @@ Results:
 Dataset:
   type: 'tum'
   sensor_type: 'depth'
-  pcd_downsample: 128
-  pcd_downsample_init: 32
+  pcd_downsample: 16
+  pcd_downsample_init: 8
   adaptive_pointsize: True
-  point_size: 0.01
+  point_size: 0.05
   single_thread: False
 
 Training:
@@ -25,7 +25,7 @@ Training:
   init_gaussian_th: 0.005
   init_gaussian_extent: 30
   # Tracking and Mapping
-  tracking_itr_num: 100
+  tracking_itr_num: 200
   mapping_itr_num: 150
   gaussian_update_every: 150
   gaussian_update_offset: 50
@@ -34,10 +34,10 @@ Training:
   gaussian_reset: 2001
   size_threshold: 20
   kf_interval: 5
-  window_size: 8
-  pose_window: 3
+  window_size: 10
+  pose_window: 4
   edge_threshold: 1.1
-  rgb_boundary_threshold: 0.01
+  rgb_boundary_threshold: 0.03
   alpha: 0.9
   kf_translation: 0.08
   kf_min_translation: 0.05
