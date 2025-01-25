@@ -221,7 +221,9 @@ def save_gaussians(gaussians, name, iteration, final=False):
         )
     gaussians.save_ply(point_cloud_path + "_point_cloud.ply")
 
-def eval_segmentation(frames, dataset, gaussians, pipe, background, save_dir=None, decoder_state_dict=None, clip_text_feature=None):
+def eval_segmentation(frames, dataset, gaussians, pipe, background, 
+                      save_dir=None, decoder_state_dict=None, clip_text_feature=None):
+    
     seg_metric = SegmentationMetric(nclass=get_semantic_channels())
     if save_dir is not None:
         semantic_class_root_dir = os.path.join(save_dir, "render", 'eval_semantic_class')
@@ -257,7 +259,7 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background, save_dir=Non
             feature_map = render_pkg["feature_map"]
             feature_map = cnn_decoder(feature_map)
             pred_ssim = feature_map.permute(1, 2, 0) @ clip_text_feature.T
-            threshold = 0.4
+            threshold = Semantic_Config.semantic_threshold
             black_mask = (pred_ssim < threshold).all(dim=-1)
             pred_label = (torch.argmax(pred_ssim, dim=-1) + 1) # W x H, 0 is background
             pred_label[black_mask] = 0 # 0 is background

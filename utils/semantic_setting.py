@@ -4,22 +4,27 @@ from typing import List, Dict
 
 @dataclass
 class Semantic_Config_DataClass:
-    wandb_project:str = "GSDFF_SLAM"
+    wandb_project:str = "GSFF_SLAM"
     save_root_dir:str = "results/replica"
     mode_list: List[str] = field(default_factory=lambda: ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino"])
     mode:str = "Grounding_Dino"
-    enable:bool = False
+    enable:bool = True
     use_lseg:bool = False
     wandb_enable:bool = False
     
-    eval_segmentation:bool = False
+    eval_segmentation:bool = True
     
     gs_init_lr:float = 5.0
     semantic_lr_scale:float = 5.0
     
-    semantic_window:int = 2
-    semantic_init_iter:int = 5 # gt label 5, , other 20+
-    semantic_iter:int = 3 
+    semantic_window:int = 1
+    
+    init_iter = {"Grounding_Dino": 20, "GT_Label": 5}
+    map_iter = {"Grounding_Dino": 6, "GT_Label": 2}
+    
+    semantic_init_iter:int = init_iter[mode]
+    semantic_iter:int = map_iter[mode]
+    semantic_threshold:float = 0.6
     
     semantic_dim: Dict[str, int] = field(default_factory=lambda: {
         "LSeg": 512,
@@ -56,7 +61,7 @@ class Semantic_Config_DataClass:
     constant_velocity_warmup:int = 5
     
     Semantic_Debug = {
-        "random_select": False,
+        "random_select": True,
     }
 
 Semantic_Config = Semantic_Config_DataClass()

@@ -2,7 +2,7 @@ Results:
   save_results: True
   save_dir: "results"
   save_trj: True
-  save_trj_kf_intv: 30
+  save_trj_kf_intv: 15
   use_gui: True
   eval_rendering: False
   use_wandb: False

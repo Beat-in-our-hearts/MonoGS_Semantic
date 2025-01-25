@@ -99,7 +99,8 @@ class SLAM:
         gt_text_tokens = clip.tokenize(class_names).to(self.frontend.device)
         gt_text_features = self.frontend.clip_model.encode_text(gt_text_tokens)
         gt_text_features /= gt_text_features.norm(dim=-1, keepdim=True)
-        self.gt_text_features = gt_text_features.to(torch.float32)
+        self.frontend.gt_text_features = gt_text_features.to(torch.float32).detach()
+        
         
         self.backend.dataset = self.dataset
         self.backend.gaussians = self.gaussians
@@ -112,6 +113,8 @@ class SLAM:
         self.backend.live_mode = self.live_mode
 
         self.backend.set_hyperparams()
+        
+        self.backend.gt_text_features = gt_text_features.to(torch.float32).detach()
 
         self.params_gui = gui_utils.ParamsGUI(
             pipe=self.pipeline_params,
@@ -173,7 +176,7 @@ class SLAM:
                             self.background,
                             self.save_dir,
                             cnn_decoder_state_dict,
-                            self.gt_text_features,
+                            self.frontend.gt_text_features,
                         )
             else:
                 seg_result = {"pixel_acc": 0, "mIoU": 0}

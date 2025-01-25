@@ -53,6 +53,8 @@ class BackEnd(mp.Process):
             self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
             if Semantic_Config.mode == "Grounding_Dino":
                 self.cnn_decoder.load_state_dict(torch.load("checkpoints/decoder_128_512.pth"))
+                
+        self.gt_text_features = None
 
     def set_hyperparams(self):
         self.save_results = self.config["Results"]["save_results"]
@@ -424,6 +426,21 @@ class BackEnd(mp.Process):
                 semantic_window = semantic_window + random.sample(random_idx_stack, random_select_num)
                 
         viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
+        
+        # NOTE rerender the semantic feature
+        with torch.no_grad():
+            if self.gt_text_features is not None:
+                render_pkg_stack = []
+                for cam_idx in range(len(semantic_window)):
+                    viewpoint = viewpoint_stack[cam_idx]
+                    render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, 
+                                        flag_semantic=True)
+                    feature_map = render_pkg["feature_map"]
+                    feature_map = self.cnn_decoder(feature_map)
+                    pred_ssim = feature_map.permute(1, 2, 0) @ self.gt_text_features.T
+                    threshold = 0.2
+                    black_mask = (pred_ssim < threshold).all(dim=-1)
+                    render_pkg_stack.append(black_mask.detach()) # black mask
          
         tensor_label_stack = []
         pred_feature_stack = []
@@ -495,12 +512,20 @@ class BackEnd(mp.Process):
                                                               Semantic_Config.semantic_dim[Semantic_Config.mode])
                     pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
                     
-                    mask = (pred_label != 0).float().unsqueeze(0)
+                    mask = (pred_label != 0).float().unsqueeze(0) # NOTE pred vaild mask
                     mask = F.interpolate(mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
+                    
+                    # TODO rerender the prev fmap, fix mask
+                    if len(render_pkg_stack) != 0:
+                        pred_empty_mask = ~mask
+                        rerender_empty_mask = render_pkg_stack[cam_idx]
+                        rerender_empty_mask = rerender_empty_mask.float().unsqueeze(0)
+                        rerender_empty_mask = F.interpolate(rerender_empty_mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
+                        empty_mask = torch.logical_and(pred_empty_mask, rerender_empty_mask)
+                        mask = torch.logical_or(mask, empty_mask) # mask = vaild_mask + empty_mask
                     
                     # TODO fussion lseg feature for wall and floor
                     # force overwrite
-
                     if Semantic_Config.use_lseg:
                         pred_dense_feature = pred_dense_feature.permute(1, 2, 0)
                         lseg_mask = torch.zeros(pred_dense_feature.shape[:2], dtype=torch.bool).cuda()
@@ -531,6 +556,7 @@ class BackEnd(mp.Process):
                     
                     # Create a mask to ignore background (label=0) regions
                     pred_dense_feature = pred_dense_feature.detach() # no grad in pred_dense_feature
+                    mask = mask.detach()
                     feature_map[:, ~mask] = 0
                     pred_dense_feature[:, ~mask] = 0
                     l1_feature = l1_loss(feature_map, pred_dense_feature)
@@ -543,9 +569,9 @@ class BackEnd(mp.Process):
                 Log(f"semantic loss: {sum(eval_loss)/10/len(semantic_window)}")
             loss_semantic.backward()
             with torch.no_grad():
-                if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
-                    self.cnn_decoder_optimizer.step()
-                    self.cnn_decoder_optimizer.zero_grad()
+                # if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
+                #     self.cnn_decoder_optimizer.step()
+                #     self.cnn_decoder_optimizer.zero_grad()
                 self.gaussians.semantic_optimizer.step()
                 self.gaussians.semantic_optimizer.zero_grad()
             

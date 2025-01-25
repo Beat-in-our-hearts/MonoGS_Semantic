@@ -65,6 +65,7 @@ class FrontEnd(mp.Process):
             self.cnn_decoder, _ = build_decoder(mode='eval')
             
         self.clip_model = None
+        self.gt_text_features = None
 
     def set_hyperparams(self):
         self.save_dir = self.config["Results"]["save_dir"]
@@ -413,18 +414,21 @@ class FrontEnd(mp.Process):
         rgb_root_dir = os.path.join(self.save_dir, "render", 'rgb')
         depth_root_dir = os.path.join(self.save_dir, "render", 'depth')
         semantic_root_dir = os.path.join(self.save_dir, "render", 'semantic')
+        semantic_class_root_dir = os.path.join(self.save_dir, "render", 'semantic_class')
         
+        os.makedirs(rgb_root_dir, exist_ok=True)
+        os.makedirs(depth_root_dir, exist_ok=True)
+        if Semantic_Config.enable:
+            os.makedirs(semantic_root_dir, exist_ok=True)
+            os.makedirs(semantic_class_root_dir, exist_ok=True)
+        
+        # rgb track edge mask
         track_mask_dir = os.path.join(self.save_dir, "render", 'track_mask')
         os.makedirs(track_mask_dir, exist_ok=True)
         
         grad_mask = viewpoint.grad_mask[0].cpu().numpy().astype(np.uint8) * 255
         grad_mask_path = os.path.join(track_mask_dir, f"grad_mask_{cur_frame_idx:04d}.png")
         cv2.imwrite(grad_mask_path, grad_mask)
-        
-        os.makedirs(rgb_root_dir, exist_ok=True)
-        os.makedirs(depth_root_dir, exist_ok=True)
-        if Semantic_Config.enable:
-            os.makedirs(semantic_root_dir, exist_ok=True)
         
         # cv2 save image 
         render_rgb = (
@@ -459,8 +463,7 @@ class FrontEnd(mp.Process):
                 render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.jpg")
                 cv2.imwrite(render_semantic_path, img_sam2_pca)
             elif Semantic_Config.mode == "GT_Label":
-                semantic_class_root_dir = os.path.join(self.save_dir, "render", 'semantic_class')
-                os.makedirs(semantic_class_root_dir, exist_ok=True)
+
                 
                 feature_map = render_pkg["feature_map"]
                 pred_label = torch.argmax(feature_map, dim=0).detach().cpu().numpy()
@@ -478,8 +481,20 @@ class FrontEnd(mp.Process):
                                                     mode="bilinear", align_corners=True).squeeze(0))
                 raise NotImplementedError
             elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
-                # raise NotImplementedError
-                pass
+                feature_map = render_pkg["feature_map"]
+                feature_map = self.cnn_decoder(feature_map)
+                pred_ssim = feature_map.permute(1, 2, 0) @ self.gt_text_features.T
+                threshold = Semantic_Config.semantic_threshold
+                black_mask = (pred_ssim < threshold).all(dim=-1)
+                pred_label = (torch.argmax(pred_ssim, dim=-1) + 1) # W x H, 0 is background
+                pred_label[black_mask] = 0 # 0 is background
+                pred_label = pred_label.detach().cpu().numpy().astype(np.uint8)
+                img_label = label_colormap()[pred_label]
+                
+                render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.jpg")
+                cv2.imwrite(render_semantic_path, cv2.cvtColor(img_label, cv2.COLOR_RGB2BGR))
+                semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{cur_frame_idx:04d}.png")
+                cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
             else:
                 raise NotImplementedError
         debug(f"Saved render: {cur_frame_idx}")
