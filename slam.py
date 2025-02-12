@@ -90,17 +90,18 @@ class SLAM:
         self.frontend.use_gui = self.use_gui
         self.frontend.set_hyperparams()
         # NOTE : Load CLIP model
-        self.frontend.clip_model, _ = clip.load("ViT-B/32", device=self.frontend.device, 
-                                        jit=True, download_root="/tmp")
-        self.frontend.clip_model.eval()
-        with open("gui/info_semantic.json", "r") as f:
-            info_semantic = json.load(f) 
-        class_names = [item["name"] for item in info_semantic["classes"]]
-        gt_text_tokens = clip.tokenize(class_names).to(self.frontend.device)
-        gt_text_features = self.frontend.clip_model.encode_text(gt_text_tokens)
-        gt_text_features /= gt_text_features.norm(dim=-1, keepdim=True)
-        self.frontend.gt_text_features = gt_text_features.to(torch.float32).detach()
-        
+        if Semantic_Config.mode != "GT_Label":
+            self.frontend.clip_model, _ = clip.load("ViT-B/32", device=self.frontend.device, 
+                                            jit=True, download_root="/tmp")
+            self.frontend.clip_model.eval()
+            with open("gui/info_semantic.json", "r") as f:
+                info_semantic = json.load(f) 
+            class_names = [item["name"] for item in info_semantic["classes"]]
+            gt_text_tokens = clip.tokenize(class_names).to(self.frontend.device)
+            gt_text_features = self.frontend.clip_model.encode_text(gt_text_tokens)
+            gt_text_features /= gt_text_features.norm(dim=-1, keepdim=True)
+            self.frontend.gt_text_features = gt_text_features.to(torch.float32).detach()
+            self.backend.gt_text_features = gt_text_features.to(torch.float32).detach()
         
         self.backend.dataset = self.dataset
         self.backend.gaussians = self.gaussians
@@ -114,8 +115,6 @@ class SLAM:
 
         self.backend.set_hyperparams()
         
-        self.backend.gt_text_features = gt_text_features.to(torch.float32).detach()
-
         self.params_gui = gui_utils.ParamsGUI(
             pipe=self.pipeline_params,
             background=self.background,
@@ -166,8 +165,11 @@ class SLAM:
                 iteration="before_opt",
                 depth_l1=not self.monocular,
             )
-            if Semantic_Config.eval_segmentation:
-                cnn_decoder_state_dict = self.frontend.cnn_decoder.state_dict()
+            if Semantic_Config.eval_segmentation and Semantic_Config.enable:
+                if Semantic_Config.mode == "GT_Label":
+                    cnn_decoder_state_dict = None
+                else:
+                    cnn_decoder_state_dict = self.frontend.cnn_decoder.state_dict()
                 seg_result = eval_segmentation(
                             self.frontend.cameras,
                             self.dataset,
@@ -321,6 +323,11 @@ if __name__ == "__main__":
     slam = SLAM(config, save_dir=save_dir)
     slam.run()
     wandb.finish()
+    
+    # relog
+    end_time = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    Log(f"Time: {end_time}")
+    Log("saving results in " + save_dir)
 
     # All done
     Log("Done.")

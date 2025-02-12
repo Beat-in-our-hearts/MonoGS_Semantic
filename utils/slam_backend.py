@@ -1,4 +1,5 @@
 import random
+import sys
 import time
 from typing import Dict, List, Union
 
@@ -581,7 +582,7 @@ class BackEnd(mp.Process):
         Log("Starting color refinement")
 
         iteration_total = 26000
-        for iteration in tqdm(range(1, iteration_total + 1)):
+        for iteration in tqdm(range(1, iteration_total + 1), mininterval=5):
             loss = 0
             viewpoint_idx_stack = list(self.viewpoints.keys())
             viewpoint_cam_idx = viewpoint_idx_stack.pop(

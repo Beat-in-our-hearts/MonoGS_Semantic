@@ -14,7 +14,7 @@ Dataset:
   pcd_downsample: 16
   pcd_downsample_init: 8
   adaptive_pointsize: True
-  point_size: 0.05
+  point_size: 0.01
   single_thread: False
 
 Training:
@@ -38,7 +38,7 @@ Training:
   pose_window: 4
   edge_threshold: 1.1
   rgb_boundary_threshold: 0.03
-  alpha: 0.9
+  alpha: 0.1
   kf_translation: 0.08
   kf_min_translation: 0.05
   kf_overlap: 0.9

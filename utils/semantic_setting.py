@@ -8,7 +8,7 @@ class Semantic_Config_DataClass:
     save_root_dir:str = "results/replica"
     mode_list: List[str] = field(default_factory=lambda: ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino"])
     mode:str = "Grounding_Dino"
-    enable:bool = True
+    enable:bool = False
     use_lseg:bool = False
     wandb_enable:bool = False
     
@@ -17,10 +17,11 @@ class Semantic_Config_DataClass:
     gs_init_lr:float = 5.0
     semantic_lr_scale:float = 5.0
     
-    semantic_window:int = 1
+    semantic_window_select = {"Grounding_Dino":1, "GT_Label": 2}
+    semantic_window:int = semantic_window_select[mode]
     
-    init_iter = {"Grounding_Dino": 20, "GT_Label": 5}
-    map_iter = {"Grounding_Dino": 6, "GT_Label": 2}
+    init_iter = {"Grounding_Dino": 20, "GT_Label": 10}
+    map_iter = {"Grounding_Dino": 6, "GT_Label": 3}
     
     semantic_init_iter:int = init_iter[mode]
     semantic_iter:int = map_iter[mode]

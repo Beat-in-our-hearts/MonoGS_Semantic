@@ -253,6 +253,9 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background,
             if save_dir is not None:    
                 semantic_class_path = os.path.join(semantic_class_root_dir, f"semantic_class_{idx:04d}.png")
                 cv2.imwrite(semantic_class_path, pred_label.astype(np.uint8))
+                vis_eval_semantic = label_colormap()[pred_label]
+                vis_semantic_class_path = os.path.join(semantic_class_root_dir, f"vis_semantic_class_{idx:04d}.jpg")
+                cv2.imwrite(vis_semantic_class_path, cv2.cvtColor(vis_eval_semantic, cv2.COLOR_RGB2BGR))
                 
         elif Semantic_Config.mode == "Grounding_Dino":
             render_pkg = render(frame, gaussians, pipe, background, flag_semantic=True)
@@ -284,7 +287,7 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background,
             
     pixel_acc, mIoU = seg_metric.get()
     Log(
-        f'pixel_acc: {pixel_acc:.3f}, ' + f'mIoU: {mIoU:.3f}',
+        f'pixel_acc: {pixel_acc:.4f}, ' + f'mIoU: {mIoU:.4f}',
         tag="Eval",
     )
     return {'pixel_acc': pixel_acc, 'mIoU': mIoU}
