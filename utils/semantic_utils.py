@@ -134,7 +134,7 @@ def label_loss(pred:torch.Tensor, label:torch.Tensor) -> torch.Tensor:
         pred: (B, C, H, W)
         label: (B, H, W)
     """
-    assert pred.dim() == 4 and label.dim() == 3, f"pred dim: {pred.dim()}, label dim: {label.dim()}"
+    assert pred.dim() == label.dim() + 1, f"pred dim: {pred.dim()}, label dim: {label.dim()}"
     return nn.CrossEntropyLoss()(pred, label)
 
 def save_seg_map(seg_map, filepath):
@@ -172,6 +172,3 @@ def create_dense_feature(label_map, feature, dim=512):
     for i in range(clip_features.shape[0]):
         dense_feature[label_map == i+1] = clip_features[i]
     return dense_feature.permute(2, 0, 1)
-
-
-
