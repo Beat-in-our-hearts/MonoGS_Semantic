@@ -7,8 +7,8 @@ class Semantic_Config_DataClass:
     wandb_project:str = "GSFF_SLAM"
     save_root_dir:str = "results/replica"
     mode_list: List[str] = field(default_factory=lambda: ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino"])
-    mode:str = "Grounding_Dino"
-    enable:bool = False
+    mode:str = "GT_Label"
+    enable:bool = True
     use_lseg:bool = False
     wandb_enable:bool = False
     
@@ -63,6 +63,11 @@ class Semantic_Config_DataClass:
     
     Semantic_Debug = {
         "random_select": True,
+    }
+    
+    GT_Exp = {
+        "mode": "Sparse GT",
+        "sparse_ratio": 0.01,
     }
 
 Semantic_Config = Semantic_Config_DataClass()

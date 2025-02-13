@@ -1,9 +1,11 @@
+import os
 import random
 import sys
 import time
 from typing import Dict, List, Union
 
 import cv2
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.multiprocessing as mp
@@ -405,7 +407,7 @@ class BackEnd(mp.Process):
             torch.cuda.empty_cache()
         return gaussian_split
 
-    def map_semantic(self, iters=1, window_size=2):
+    def map_semantic(self, iters=1, window_size=2, init_flag=False):
         start_time = time.time()
         if not Semantic_Config.enable:
             return
@@ -444,14 +446,55 @@ class BackEnd(mp.Process):
                     render_pkg_stack.append(black_mask.detach()) # black mask
          
         tensor_label_stack = []
+        sparse_mask_stack = []
         pred_feature_stack = []
         lseg_label_stack = []
         if Semantic_Config.mode == "GT_Label": # GT label
-            for i in range(len(semantic_window)):
-                gt_label_path = self.dataset.get_gt_semantic(semantic_window[i])
-                label_img = cv2.imread(gt_label_path, cv2.IMREAD_GRAYSCALE) # W H
-                gt_label = torch.tensor(label_img).long().cuda()
-                tensor_label_stack.append(gt_label)
+            if Semantic_Config.GT_Exp["mode"] == "Sparse GT":
+                sparse_label_dir = os.path.join(self.config["Results"]["save_dir"], "sparse_gt", "label")
+                sparse_maks_dir = os.path.join(self.config["Results"]["save_dir"], "sparse_gt", "mask")
+            
+                if init_flag:
+                    Log(f"Sparse GT: {Semantic_Config.GT_Exp['sparse_ratio']}")
+                
+                    os.makedirs(sparse_label_dir, exist_ok=True)
+                    os.makedirs(sparse_maks_dir, exist_ok=True)
+                        
+                    # generate sparse GT label
+                    for i in tqdm(range(self.dataset.num_imgs)):
+                        gt_label_path = self.dataset.get_gt_semantic(i)
+                        label_img = cv2.imread(gt_label_path, cv2.IMREAD_GRAYSCALE)
+                        
+                        pix_W, pix_H = label_img.shape
+                        num_pix = pix_W * pix_H
+                        num_keep = int(num_pix * Semantic_Config.GT_Exp["sparse_ratio"])
+                        indices_keep = np.random.choice(num_pix, num_keep, replace=False)
+                        
+                        temp_label = np.zeros_like(label_img)
+                        mask = np.zeros_like(label_img, dtype=bool)
+                        temp_label.flat[indices_keep] = label_img.flat[indices_keep]
+                        mask.flat[indices_keep] = True
+                        
+                        cv2.imwrite(os.path.join(sparse_label_dir, f"{i:04d}.png"), temp_label)
+                        cv2.imwrite(os.path.join(sparse_maks_dir, f"{i:04d}.png"), (mask*255).astype("uint8"))
+            
+                for i in range(len(semantic_window)):
+                    sparse_label_path = os.path.join(sparse_label_dir, f"{semantic_window[i]:04d}.png")
+                    sparse_mask_path = os.path.join(sparse_maks_dir, f"{semantic_window[i]:04d}.png")
+                    label_img = cv2.imread(sparse_label_path, cv2.IMREAD_GRAYSCALE)
+                    sparse_mask_img = cv2.imread(sparse_mask_path, cv2.IMREAD_GRAYSCALE)
+                    
+                    gt_label = torch.tensor(label_img).long().cuda()
+                    tensor_label_stack.append(gt_label.detach())
+                    sparse_mask = torch.tensor(sparse_mask_img).long().cuda().to(torch.bool)
+                    sparse_mask_stack.append(sparse_mask.detach())
+                    
+            else: # Normal GT label
+                for i in range(len(semantic_window)):
+                    gt_label_path = self.dataset.get_gt_semantic(semantic_window[i])
+                    label_img = cv2.imread(gt_label_path, cv2.IMREAD_GRAYSCALE) # W H
+                    gt_label = torch.tensor(label_img).long().cuda()
+                    tensor_label_stack.append(gt_label.detach())
         elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]: # pred label with feature
             for i in range(len(semantic_window)):
                 pred_label_path = self.dataset.get_pred_label(semantic_window[i])
@@ -497,9 +540,19 @@ class BackEnd(mp.Process):
                     loss_semantic += l1_feature
                     
                 elif Semantic_Config.mode == "GT_Label":
-                    gt_label = tensor_label_stack[cam_idx]
-                    loss_label = label_loss(feature_map.unsqueeze(0), gt_label.unsqueeze(0))
-                    loss_semantic += loss_label
+                    if Semantic_Config.GT_Exp["mode"] == "Sparse GT":
+                        gt_label = tensor_label_stack[cam_idx]
+                        mask = sparse_mask_stack[cam_idx]
+                        
+                        pred_feature = feature_map[:,mask].unsqueeze(0)
+                        gt_label = gt_label[mask].unsqueeze(0)
+                        
+                        loss_label = label_loss(pred_feature, gt_label)
+                        loss_semantic += loss_label
+                    else:
+                        gt_label = tensor_label_stack[cam_idx]
+                        loss_label = label_loss(feature_map.unsqueeze(0), gt_label.unsqueeze(0))
+                        loss_semantic += loss_label
                 elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
                     # resize the feature map
                     render_size = Semantic_Config.render_size
@@ -523,6 +576,14 @@ class BackEnd(mp.Process):
                         rerender_empty_mask = rerender_empty_mask.float().unsqueeze(0)
                         rerender_empty_mask = F.interpolate(rerender_empty_mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
                         empty_mask = torch.logical_and(pred_empty_mask, rerender_empty_mask)
+                        
+                        # fill the mini hole of empty_mask, use Erosion than Dilation
+                        empty_mask_unsqueeze = empty_mask.unsqueeze(0).unsqueeze(0).float()
+                        max_pool = nn.MaxPool2d(kernel_size=9, stride=1, padding=4) # 5x5 kernel
+                        empty_mask_unsqueeze = -max_pool(empty_mask_unsqueeze) # Erosion
+                        empty_mask_unsqueeze = max_pool(empty_mask_unsqueeze) # Dilation
+                        empty_mask = empty_mask_unsqueeze.squeeze(0).squeeze(0).to(torch.bool)
+                        
                         mask = torch.logical_or(mask, empty_mask) # mask = vaild_mask + empty_mask
                     
                     # TODO fussion lseg feature for wall and floor
@@ -558,8 +619,9 @@ class BackEnd(mp.Process):
                     # Create a mask to ignore background (label=0) regions
                     pred_dense_feature = pred_dense_feature.detach() # no grad in pred_dense_feature
                     mask = mask.detach()
-                    feature_map[:, ~mask] = 0
-                    pred_dense_feature[:, ~mask] = 0
+                    if not init_flag:
+                        feature_map[:, ~mask] = 0
+                        pred_dense_feature[:, ~mask] = 0
                     l1_feature = l1_loss(feature_map, pred_dense_feature)
                     loss_semantic += l1_feature
                 else:
@@ -676,7 +738,7 @@ class BackEnd(mp.Process):
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map, init=True)
                     self.initialize_map(cur_frame_idx, viewpoint)
                     self.current_window = [cur_frame_idx]
-                    self.map_semantic(iters=Semantic_Config.semantic_init_iter)
+                    self.map_semantic(iters=Semantic_Config.semantic_init_iter, init_flag=True)
                     self.push_to_frontend("init")
 
                 elif data[0] == "keyframe":
