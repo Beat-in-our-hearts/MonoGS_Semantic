@@ -23,6 +23,8 @@ from utils.camera_utils import Camera
 from utils.semantic_utils import build_decoder, label_loss, create_dense_feature
 from utils.semantic_setting import Semantic_Config
 
+from diff_gaussian_rasterization import get_semantic_channels
+
 class BackEnd(mp.Process):
     def __init__(self, config):
         super().__init__()
@@ -451,14 +453,15 @@ class BackEnd(mp.Process):
         lseg_label_stack = []
         if Semantic_Config.mode == "GT_Label": # GT label
             if Semantic_Config.GT_Exp["mode"] == "Sparse GT":
+                # define sparse GT label path
                 sparse_label_dir = os.path.join(self.config["Results"]["save_dir"], "sparse_gt", "label")
-                sparse_maks_dir = os.path.join(self.config["Results"]["save_dir"], "sparse_gt", "mask")
+                sparse_mask_dir = os.path.join(self.config["Results"]["save_dir"], "sparse_gt", "mask")
             
                 if init_flag:
                     Log(f"Sparse GT: {Semantic_Config.GT_Exp['sparse_ratio']}")
                 
                     os.makedirs(sparse_label_dir, exist_ok=True)
-                    os.makedirs(sparse_maks_dir, exist_ok=True)
+                    os.makedirs(sparse_mask_dir, exist_ok=True)
                         
                     # generate sparse GT label
                     for i in tqdm(range(self.dataset.num_imgs)):
@@ -476,11 +479,11 @@ class BackEnd(mp.Process):
                         mask.flat[indices_keep] = True
                         
                         cv2.imwrite(os.path.join(sparse_label_dir, f"{i:04d}.png"), temp_label)
-                        cv2.imwrite(os.path.join(sparse_maks_dir, f"{i:04d}.png"), (mask*255).astype("uint8"))
+                        cv2.imwrite(os.path.join(sparse_mask_dir, f"{i:04d}.png"), (mask*255).astype("uint8"))
             
                 for i in range(len(semantic_window)):
                     sparse_label_path = os.path.join(sparse_label_dir, f"{semantic_window[i]:04d}.png")
-                    sparse_mask_path = os.path.join(sparse_maks_dir, f"{semantic_window[i]:04d}.png")
+                    sparse_mask_path = os.path.join(sparse_mask_dir, f"{semantic_window[i]:04d}.png")
                     label_img = cv2.imread(sparse_label_path, cv2.IMREAD_GRAYSCALE)
                     sparse_mask_img = cv2.imread(sparse_mask_path, cv2.IMREAD_GRAYSCALE)
                     
@@ -488,7 +491,37 @@ class BackEnd(mp.Process):
                     tensor_label_stack.append(gt_label.detach())
                     sparse_mask = torch.tensor(sparse_mask_img).long().cuda().to(torch.bool)
                     sparse_mask_stack.append(sparse_mask.detach())
+            elif Semantic_Config.GT_Exp["mode"] == "Noise GT":
+                # define noise GT label path
+                noise_label_dir = os.path.join(self.config["Results"]["save_dir"], "noise_gt", "label")
+                
+                if init_flag:
+                    Log(f"Noise GT: {Semantic_Config.GT_Exp['noise_ratio']}")
                     
+                    os.makedirs(noise_label_dir, exist_ok=True)
+                    # generate noise GT label
+                    for i in tqdm(range(self.dataset.num_imgs)):
+                        gt_label_path = self.dataset.get_gt_semantic(i)
+                        label_img = cv2.imread(gt_label_path, cv2.IMREAD_GRAYSCALE)
+                        
+                        pix_W, pix_H = label_img.shape
+                        num_pix = pix_W * pix_H
+                        num_noise = int(num_pix * Semantic_Config.GT_Exp["noise_ratio"])
+                        indices_noise = np.random.choice(num_pix, num_noise, replace=False)
+                        
+                        # combine noise label with GT label
+                        temp_label = np.zeros_like(label_img)
+                        temp_label.flat[indices_noise] = np.random.randint(0, get_semantic_channels(), num_noise)
+                        temp_label = np.where(temp_label == 0, label_img, temp_label)
+                        
+                        cv2.imwrite(os.path.join(noise_label_dir, f"{i:04d}.png"), temp_label)
+                
+                for i in range(len(semantic_window)):
+                    noise_label_path = os.path.join(noise_label_dir, f"{semantic_window[i]:04d}.png")
+                    label_img = cv2.imread(noise_label_path, cv2.IMREAD_GRAYSCALE)
+                    gt_label = torch.tensor(label_img).long().cuda()
+                    tensor_label_stack.append(gt_label.detach())        
+                
             else: # Normal GT label
                 for i in range(len(semantic_window)):
                     gt_label_path = self.dataset.get_gt_semantic(semantic_window[i])
