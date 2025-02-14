@@ -448,6 +448,30 @@ class ScanNetDataset(MonocularDataset):
         self.depth_paths = parser.depth_paths
         self.poses = parser.poses
         
+class ScanNetDataset_Semantic(MonocularDataset):
+    def __init__(self, args, path, config):
+        super().__init__(args, path, config)
+        dataset_path = config["Dataset"]["dataset_path"]
+        parser = ScanNetParser(dataset_path)
+        self.num_imgs = parser.n_img
+        self.color_paths = parser.color_paths
+        self.depth_paths = parser.depth_paths
+        self.poses = parser.poses
+        
+        self.semantic_paths = sorted(glob.glob(f"{dataset_path}/semantic_class/semantic_class_*.png"))
+        
+    def get_gt_semantic(self, idx):
+        return self.semantic_paths[idx]
+    
+    def get_pred_semantic(self, idx):
+        raise NotImplementedError
+    
+    def get_pred_lseg_label(self, idx):
+        raise NotImplementedError
+    
+    def get_pred_label(self, idx):
+        raise NotImplementedError
+        
 class ReplicaDataset_Semantic(MonocularDataset):
     def __init__(self, args, path, config):
         super().__init__(args, path, config)
@@ -457,6 +481,7 @@ class ReplicaDataset_Semantic(MonocularDataset):
         self.color_paths = parser.color_paths
         self.depth_paths = parser.depth_paths
         self.poses = parser.poses
+        
         self.semantic_paths = sorted(glob.glob(f"{dataset_path}/semantic_class/semantic_class_*.png"))
         self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.pt"))
         if Semantic_Config.mode == "SAM_CLIP":
@@ -598,6 +623,8 @@ def load_dataset(args, path, config):
         return ReplicaDataset_Semantic(args, path, config)
     elif config["Dataset"]["type"] == "scannet":
         return ScanNetDataset(args, path, config)
+    elif config["Dataset"]["type"] == "scannet_semantic":
+        return ScanNetDataset_Semantic(args, path, config)
     elif config["Dataset"]["type"] == "euroc":
         return EurocDataset(args, path, config)
     elif config["Dataset"]["type"] == "realsense":
