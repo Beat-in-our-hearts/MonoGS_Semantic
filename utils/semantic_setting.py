@@ -66,8 +66,9 @@ class Semantic_Config_DataClass:
     }
     
     GT_Exp = {
-        "mode": "Sparse GT",
+        "mode": "None", # ["Sparse GT", "Noise GT"]
         "sparse_ratio": 0.01,
+        "noise_ratio": 0.99,
     }
 
 Semantic_Config = Semantic_Config_DataClass()

@@ -10,8 +10,8 @@ Results:
 Dataset:
   type: 'scannet_semantic'
   sensor_type: 'depth'
-  pcd_downsample: 64
-  pcd_downsample_init: 32
+  pcd_downsample: 32
+  pcd_downsample_init: 16
   adaptive_pointsize: True
   point_size: 0.05
 
