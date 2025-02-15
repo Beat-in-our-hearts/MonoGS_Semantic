@@ -409,6 +409,23 @@ class BackEnd(mp.Process):
             torch.cuda.empty_cache()
         return gaussian_split
 
+    def map_grounding_dino(self, iters=1, window_size=2, init_flag=False):
+        if Semantic_Config.mode in ["Grounding_Dino_v2", "Grounding_Dino"] and Semantic_Config.enable:
+            raise ValueError('''Semantic_Config.mode in ['Grounding_Dino_v2', 'Grounding_Dino'] and Semantic_Config.enable''')
+
+        if len(self.current_window) == 0:
+            return
+        # TODO random select previous frame in semantic_window
+        semantic_window = self.current_window[:window_size]
+        viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
+        
+        render_pkg_mask_stack = {}
+        
+        with torch.no_grad():
+            for cam_idx in semantic_window:
+                if cam_idx == 0:
+                
+                
     def map_semantic(self, iters=1, window_size=2, init_flag=False):
         start_time = time.time()
         if not Semantic_Config.enable:
@@ -434,8 +451,8 @@ class BackEnd(mp.Process):
         
         # NOTE rerender the semantic feature
         with torch.no_grad():
-            if self.gt_text_features is not None:
-                render_pkg_stack = []
+            if Semantic_Config.mode in ["Grounding_Dino_v2", "Grounding_Dino"]:
+                render_pkg_mask_stack = []
                 for cam_idx in range(len(semantic_window)):
                     viewpoint = viewpoint_stack[cam_idx]
                     render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, 
@@ -445,7 +462,7 @@ class BackEnd(mp.Process):
                     pred_ssim = feature_map.permute(1, 2, 0) @ self.gt_text_features.T
                     threshold = 0.2
                     black_mask = (pred_ssim < threshold).all(dim=-1)
-                    render_pkg_stack.append(black_mask.detach()) # black mask
+                    render_pkg_mask_stack.append(black_mask.detach()) # black mask
          
         tensor_label_stack = []
         sparse_mask_stack = []
@@ -545,6 +562,20 @@ class BackEnd(mp.Process):
                     lseg_label_img = cv2.imread(pred_lseg_label_path, cv2.IMREAD_GRAYSCALE)
                     lseg_label = torch.tensor(lseg_label_img).long().cuda()
                     lseg_label_stack.append(lseg_label)
+        elif Semantic_Config.mode in ["Grounding_Dino_v2"]:
+            for i in range(len(semantic_window)):
+                pred_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
+                pred_feature = torch.load(pred_semantic_path, weights_only=True) 
+                if pred_feature["class_names"] != None:
+                    pred_feature_stack.append(pred_feature)
+                    
+                    pred_label_path = self.dataset.get_pred_label(semantic_window[i])
+                    label_img = cv2.imread(pred_label_path, cv2.IMREAD_GRAYSCALE)
+                    pred_label = torch.tensor(label_img).long().cuda()
+                    tensor_label_stack.append(pred_label)    
+                else:
+                    pred_feature_stack.append(None)
+                    tensor_label_stack.append(None)
         else:
             if Semantic_Config.preload_semantic:
                 for i in range(len(semantic_window)):
@@ -571,7 +602,25 @@ class BackEnd(mp.Process):
                     pred_feature = F.interpolate(pred_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
                     l1_feature = l1_loss(feature_map, pred_feature)
                     loss_semantic += l1_feature
+                elif Semantic_Config.mode in ["Grounding_Dino_v2"]:
+                    # no decect
+                    if pred_feature_stack[cam_idx] == None and tensor_label_stack[cam_idx] == None: 
+                        continue
+                    render_size = Semantic_Config.render_size
+                    feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), render_size,mode="bilinear", align_corners=True).squeeze(0))
                     
+                    # resize the supervise signal
+                    pred_label = tensor_label_stack[cam_idx]  
+                    pred_feature = pred_feature_stack[cam_idx]
+                    pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim[Semantic_Config.mode])
+                    pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
+                    
+                    # resize the supervise mask
+                    mask = (pred_label != 0).float().unsqueeze(0) 
+                    mask = F.interpolate(mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
+                    
+                    
+                     
                 elif Semantic_Config.mode == "GT_Label":
                     if Semantic_Config.GT_Exp["mode"] == "Sparse GT":
                         gt_label = tensor_label_stack[cam_idx]
@@ -603,9 +652,9 @@ class BackEnd(mp.Process):
                     mask = F.interpolate(mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
                     
                     # TODO rerender the prev fmap, fix mask
-                    if len(render_pkg_stack) != 0:
+                    if len(render_pkg_mask_stack) != 0:
                         pred_empty_mask = ~mask
-                        rerender_empty_mask = render_pkg_stack[cam_idx]
+                        rerender_empty_mask = render_pkg_mask_stack[cam_idx]
                         rerender_empty_mask = rerender_empty_mask.float().unsqueeze(0)
                         rerender_empty_mask = F.interpolate(rerender_empty_mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
                         empty_mask = torch.logical_and(pred_empty_mask, rerender_empty_mask)
