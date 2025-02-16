@@ -6,8 +6,8 @@ from typing import List, Dict
 class Semantic_Config_DataClass:
     wandb_project:str = "GSFF_SLAM"
     save_root_dir:str = "results/replica"
-    mode_list: List[str] = field(default_factory=lambda: ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino"])
-    mode:str = "GT_Label"
+    mode_list: List[str] = field(default_factory=lambda: ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"])
+    mode:str = "Grounding_Dino"
     enable:bool = True
     use_lseg:bool = False
     wandb_enable:bool = False
@@ -17,11 +17,11 @@ class Semantic_Config_DataClass:
     gs_init_lr:float = 5.0
     semantic_lr_scale:float = 5.0
     
-    semantic_window_select = {"Grounding_Dino":1, "GT_Label": 2}
+    semantic_window_select = {"Grounding_Dino":1, "GT_Label": 2, "Grounding_Dino_v2":1}
     semantic_window:int = semantic_window_select[mode]
     
-    init_iter = {"Grounding_Dino": 20, "GT_Label": 10}
-    map_iter = {"Grounding_Dino": 6, "GT_Label": 3}
+    init_iter = {"Grounding_Dino": 20, "GT_Label": 10, "Grounding_Dino_v2": 20}
+    map_iter = {"Grounding_Dino": 6, "GT_Label": 3, "Grounding_Dino_v2": 6}
     
     semantic_init_iter:int = init_iter[mode]
     semantic_iter:int = map_iter[mode]
@@ -34,6 +34,7 @@ class Semantic_Config_DataClass:
         "GT_Label": 128,
         "SAM_CLIP": 512,
         "Grounding_Dino": 512,
+        "Grounding_Dino_v2": 512,
     })
     fmap_size: Dict[str, List[int]] = field(default_factory=lambda: {
         "LSeg": [360, 480],
@@ -47,6 +48,7 @@ class Semantic_Config_DataClass:
         "GT_Label": "gt_label",
         "SAM_CLIP": "florence2_sam2", # fusion_features_0000.pt, mask_auto_label_0000.png
         "Grounding_Dino": "grounding_dino", # grounding_dino_feature_0000.pt, pred_label_0000.png
+        "Grounding_Dino_v2": "grounding_dino_v2",
     })
     render_size = [360, 480]
     

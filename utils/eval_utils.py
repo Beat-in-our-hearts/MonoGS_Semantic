@@ -229,7 +229,7 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background,
         semantic_class_root_dir = os.path.join(save_dir, "render", 'eval_semantic_class')
         os.makedirs(semantic_class_root_dir, exist_ok=True)
     
-    if Semantic_Config.mode == "Grounding_Dino":
+    if Semantic_Config.mode in ["Grounding_Dino","Grounding_Dino_v2"]:
         cnn_decoder, _ = build_decoder(mode="eval")
         if decoder_state_dict is not None:
             cnn_decoder.load_state_dict(decoder_state_dict)
@@ -257,7 +257,7 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background,
                 vis_semantic_class_path = os.path.join(semantic_class_root_dir, f"vis_semantic_class_{idx:04d}.jpg")
                 cv2.imwrite(vis_semantic_class_path, cv2.cvtColor(vis_eval_semantic, cv2.COLOR_RGB2BGR))
                 
-        elif Semantic_Config.mode == "Grounding_Dino":
+        elif Semantic_Config.mode in ["Grounding_Dino","Grounding_Dino_v2"]:
             render_pkg = render(frame, gaussians, pipe, background, flag_semantic=True)
             feature_map = render_pkg["feature_map"]
             feature_map = cnn_decoder(feature_map)

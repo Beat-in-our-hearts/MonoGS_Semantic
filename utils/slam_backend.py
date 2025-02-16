@@ -25,6 +25,8 @@ from utils.semantic_setting import Semantic_Config
 
 from diff_gaussian_rasterization import get_semantic_channels
 
+import scipy.ndimage as ndi
+
 class BackEnd(mp.Process):
     def __init__(self, config):
         super().__init__()
@@ -54,9 +56,9 @@ class BackEnd(mp.Process):
         self.keyframe_optimizers = None
         
         # CNN Decoder to upsample semantic features
-        if Semantic_Config.enable and Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
+        if Semantic_Config.enable and Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"]:
             self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
-            if Semantic_Config.mode == "Grounding_Dino":
+            if Semantic_Config.mode == ["Grounding_Dino", "Grounding_Dino_v2"]:
                 self.cnn_decoder.load_state_dict(torch.load("checkpoints/decoder_128_512.pth"))
                 
         self.gt_text_features = None
@@ -409,22 +411,112 @@ class BackEnd(mp.Process):
             torch.cuda.empty_cache()
         return gaussian_split
 
-    def map_grounding_dino(self, iters=1, window_size=2, init_flag=False):
+    def map_grounding_dino(self, iters=1, window_size=2, predict_threshold = 0.3, init_flag=False):
         if Semantic_Config.mode in ["Grounding_Dino_v2", "Grounding_Dino"] and Semantic_Config.enable:
+            pass
+        else:
             raise ValueError('''Semantic_Config.mode in ['Grounding_Dino_v2', 'Grounding_Dino'] and Semantic_Config.enable''')
 
         if len(self.current_window) == 0:
             return
         # TODO random select previous frame in semantic_window
         semantic_window = self.current_window[:window_size]
-        viewpoint_stack = [self.viewpoints[kf_idx] for kf_idx in semantic_window]
+        viewpoint_stack = {kf_idx:self.viewpoints[kf_idx] for kf_idx in semantic_window}
         
-        render_pkg_mask_stack = {}
+        pred_feature_stack = {}
+        pred_label_stack = {}
         
+        for cam_idx in semantic_window:
+            pred_semantic_path = self.dataset.get_pred_semantic(cam_idx)
+            pred_feature = torch.load(pred_semantic_path, weights_only=True) 
+            pred_feature_stack[cam_idx] = pred_feature
+                
+            pred_label_path = self.dataset.get_pred_label(cam_idx)
+            label_img = cv2.imread(pred_label_path, cv2.IMREAD_GRAYSCALE)
+            pred_label = torch.tensor(label_img).long().cuda()
+            pred_label_stack[cam_idx] = pred_label
+        
+        if init_flag:
+            for _ in range(iters):
+                loss_semantic = 0
+                # init frame
+                viewpoint = viewpoint_stack[0] 
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
+                feature_map = render_pkg["feature_map"]
+                # resize the feature map
+                render_size = Semantic_Config.render_size
+                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), render_size,mode="bilinear", align_corners=True).squeeze(0))
+                # get pred feature
+                pred_label = pred_label_stack[cam_idx]  
+                pred_feature = pred_feature_stack[cam_idx]
+                pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim[Semantic_Config.mode])
+                pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
+                # compute loss
+                l1_feature = l1_loss(feature_map, pred_dense_feature)
+                loss_semantic += l1_feature
+                loss_semantic.backward()
+                print(l1_feature.item())
+                with torch.no_grad():
+                    self.gaussians.semantic_optimizer.step()
+                    self.gaussians.semantic_optimizer.zero_grad()
+            return
+            
+        # get rerender black mask 1:black
+        predict_mask_stack = {}
         with torch.no_grad():
             for cam_idx in semantic_window:
-                if cam_idx == 0:
+                viewpoint = viewpoint_stack[cam_idx]
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
+                feature_map = render_pkg["feature_map"]
+                feature_map = self.cnn_decoder(feature_map)
+                pred_ssim = feature_map.detach().permute(1, 2, 0) @ self.gt_text_features.T # NOTE
+                black_mask = (pred_ssim < predict_threshold).all(dim=-1)
                 
+                black_mask = black_mask.cpu().numpy()
+                labeled_array, num_area = ndi.label(black_mask)
+                hole_threshold = 1000
+                area_sizes = np.bincount(labeled_array.ravel()) 
+                small_area_indices = np.where(area_sizes < hole_threshold)[0]
+                hole_mask = np.zeros_like(black_mask)
+                for indices in small_area_indices:
+                    hole_mask[labeled_array==indices] = 1
+                hole_mask = hole_mask.astype(bool)
+                
+                predict_mask = black_mask & ~hole_mask
+                predict_mask_stack[cam_idx] = torch.tensor(predict_mask).cuda() 
+               
+        for _ in range(iters):
+            loss_semantic = 0
+            for cam_idx in semantic_window:
+                viewpoint = viewpoint_stack[cam_idx] 
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
+                feature_map = render_pkg["feature_map"]
+                # resize the feature map
+                render_size = Semantic_Config.render_size
+                feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), render_size,mode="bilinear", align_corners=True).squeeze(0))
+                # get pred feature
+                pred_label = pred_label_stack[cam_idx]  
+                pred_feature = pred_feature_stack[cam_idx]
+                pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim[Semantic_Config.mode])
+                pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
+                # NOTE vaild mask
+                vaild_mask = pred_label != 0
+                black_mask = predict_mask_stack[cam_idx]
+                vaild_mask = torch.logical_or(vaild_mask, black_mask)
+                vaild_mask = vaild_mask.float().unsqueeze(0)
+                vaild_mask = F.interpolate(vaild_mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
+                
+                # no grad in pred_dense_feature
+                pred_dense_feature = pred_dense_feature.detach() 
+                vaild_mask = vaild_mask.detach()
+                l1_feature = l1_loss(feature_map[...,vaild_mask], pred_dense_feature[...,vaild_mask])
+                loss_semantic += l1_feature
+            
+            loss_semantic.backward()
+            with torch.no_grad():
+                self.gaussians.semantic_optimizer.step()
+                self.gaussians.semantic_optimizer.zero_grad()   
+            
                 
     def map_semantic(self, iters=1, window_size=2, init_flag=False):
         start_time = time.time()
@@ -591,8 +683,7 @@ class BackEnd(mp.Process):
             loss_semantic = 0
             for cam_idx in range(len(semantic_window)):
                 viewpoint = viewpoint_stack[cam_idx]
-                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background,
-                                    flag_semantic=True)
+                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
                 feature_map = render_pkg["feature_map"]
                 if Semantic_Config.mode in ["SAM2", "CLIP"]:
                     render_size = Semantic_Config.render_size
@@ -771,7 +862,7 @@ class BackEnd(mp.Process):
             tag = "sync_backend"
         state_dict_cpu = None
         if Semantic_Config.enable:
-            if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
+            if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"]:
                 decoder_state_dict = self.cnn_decoder.state_dict()
                 state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
         msg = [tag, self.gaussians.get_state_dict(), self.occ_aware_visibility, keyframes, state_dict_cpu]
@@ -820,7 +911,10 @@ class BackEnd(mp.Process):
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map, init=True)
                     self.initialize_map(cur_frame_idx, viewpoint)
                     self.current_window = [cur_frame_idx]
-                    self.map_semantic(iters=Semantic_Config.semantic_init_iter, init_flag=True)
+                    if Semantic_Config.mode == "Grounding_Dino_v2":
+                        self.map_grounding_dino(iters=Semantic_Config.semantic_init_iter, init_flag=True)
+                    else:
+                        self.map_semantic(iters=Semantic_Config.semantic_init_iter, init_flag=True)
                     self.push_to_frontend("init")
 
                 elif data[0] == "keyframe":
@@ -852,7 +946,10 @@ class BackEnd(mp.Process):
                     
                     self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)
-                    self.map_semantic(iters=Semantic_Config.semantic_iter, window_size=Semantic_Config.semantic_window)
+                    if Semantic_Config.mode == "Grounding_Dino_v2":
+                        self.map_grounding_dino(iters=Semantic_Config.semantic_iter, window_size=Semantic_Config.semantic_window)
+                    else:
+                        self.map_semantic(iters=Semantic_Config.semantic_iter, window_size=Semantic_Config.semantic_window)
                     self.push_to_frontend("keyframe")
                     info(f"[{cur_frame_idx:04d}] map time: {time.time()-map_start_time:.1f} keyframes_num: {len(self.viewpoints)} map_window:{self.current_window}")
                 else:

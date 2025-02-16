@@ -96,7 +96,7 @@ class SLAM_GUI:
                 self.semantic_gui_init = False
             elif Semantic_Config.mode == "GT_Label":
                 self.semantic_gui_init = True
-            elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
+            elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"]:
                 self.cnn_decoder, _ = build_decoder(mode='eval')
                 self.semantic_gui_init = False
                 
@@ -818,7 +818,7 @@ class SLAM_GUI:
                 mix_beta = 1 - mix_alpha
                 mix_img = (mix_alpha * img_sam2_pca + mix_beta * rgb).astype(np.uint8)
                 render_img = o3d.geometry.Image(mix_img)
-            elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
+            elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"]:
                 feature_map = results["feature_map"]
                 render_shape = feature_map.shape
                 resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 

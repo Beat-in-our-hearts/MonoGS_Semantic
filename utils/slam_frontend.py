@@ -61,7 +61,7 @@ class FrontEnd(mp.Process):
         self.pause = False
         
         # CNN Decoder to upsample semantic features
-        if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
+        if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"]:
             self.cnn_decoder, _ = build_decoder(mode='eval')
             
         self.clip_model = None
@@ -480,7 +480,7 @@ class FrontEnd(mp.Process):
                                                     size= Semantic_Config.render_size,
                                                     mode="bilinear", align_corners=True).squeeze(0))
                 raise NotImplementedError
-            elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino"]:
+            elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"]:
                 feature_map = render_pkg["feature_map"]
                 feature_map = self.cnn_decoder(feature_map)
                 pred_ssim = feature_map.permute(1, 2, 0) @ self.gt_text_features.T
@@ -507,7 +507,7 @@ class FrontEnd(mp.Process):
         self.gaussians.save_ply(path=os.path.join(ckpts_dir, f"gaussian_kf_{text}.ply"))
         
         if Semantic_Config.enable:
-            if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino"]:
+            if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"]:
                 decoder_state_dict = self.cnn_decoder.state_dict()
                 torch.save(decoder_state_dict, os.path.join(ckpts_dir,  f"decoder_{text}.pth"))
         
