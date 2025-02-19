@@ -116,18 +116,54 @@ def generate_colored_mask(heatmaps, thresholded=95):
 # heatmaps = [heatmap1, heatmap2, heatmap3, heatmap4]
 # generate_colored_mask(heatmaps)
 
-def build_decoder(mode='train', lr=0.001):
-    pred_feature_dim = Semantic_Config.semantic_dim[Semantic_Config.mode]
-    semantic_feature_dim = get_semantic_channels()
-    cnn_decoder, cnn_decoder_optimizer = None, None
-    if mode == 'train':
-        cnn_decoder = nn.Conv2d(semantic_feature_dim, pred_feature_dim, kernel_size=1).to("cuda")
-        cnn_decoder.requires_grad_(True)
-        cnn_decoder_optimizer = torch.optim.Adam(cnn_decoder.parameters(), lr=lr)
-    elif mode == 'eval':
-        cnn_decoder = nn.Conv2d(semantic_feature_dim, pred_feature_dim, kernel_size=1).to("cuda")
-        cnn_decoder.eval()
-    return cnn_decoder, cnn_decoder_optimizer
+class Autoencoder(nn.Module):
+    def __init__(self, input_dim=512, hidden_dim=128):
+        super(Autoencoder, self).__init__()
+        
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, 512),
+            nn.ReLU(True),
+            nn.Linear(512, 256),
+            nn.ReLU(True),
+            nn.Linear(256, hidden_dim),
+        )
+        
+        self.decoder = nn.Sequential(
+            nn.Linear(hidden_dim, 256),
+            nn.ReLU(True),
+            nn.Linear(256, 512),
+            nn.ReLU(True),
+            nn.Linear(512, input_dim),
+        )
+    
+    def forward(self, x):
+        x = self.encoder(x)  
+        x = self.decoder(x)  
+        return x
+    
+    def encode(self, x):
+        x = self.encoder(x)
+        return x
+    
+    
+def build_decoder(mode='train', lr=0.001, model_type='cnn'):
+    if model_type == 'cnn':
+        pred_feature_dim = Semantic_Config.semantic_dim[Semantic_Config.mode]
+        semantic_feature_dim = get_semantic_channels()
+        cnn_decoder, cnn_decoder_optimizer = None, None
+        if mode == 'train':
+            cnn_decoder = nn.Conv2d(semantic_feature_dim, pred_feature_dim, kernel_size=1).to("cuda")
+            cnn_decoder.requires_grad_(True)
+            cnn_decoder_optimizer = torch.optim.Adam(cnn_decoder.parameters(), lr=lr)
+        elif mode == 'eval':
+            cnn_decoder = nn.Conv2d(semantic_feature_dim, pred_feature_dim, kernel_size=1).to("cuda")
+            cnn_decoder.eval()
+        return cnn_decoder, cnn_decoder_optimizer
+    elif model_type == 'autoencoder':
+        semantic_feature_dim = get_semantic_channels()
+        autoencoder = Autoencoder(input_dim=Semantic_Config.semantic_dim[Semantic_Config.mode], hidden_dim=semantic_feature_dim).to("cuda")
+        autoencoder.eval()
+        return autoencoder, None
 
 def label_loss(pred:torch.Tensor, label:torch.Tensor) -> torch.Tensor:
     """

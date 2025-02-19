@@ -171,6 +171,7 @@ class SLAM:
                 iteration="before_opt",
                 depth_l1=not self.monocular,
             )
+            seg_result = {"pixel_acc": 0, "mIoU": 0}
             if Semantic_Config.eval_segmentation and Semantic_Config.enable:
                 if Semantic_Config.mode == "GT_Label":
                     cnn_decoder_state_dict = None
@@ -187,8 +188,7 @@ class SLAM:
                                 cnn_decoder_state_dict,
                                 self.frontend.gt_text_features,
                             )
-            else:
-                seg_result = {"pixel_acc": 0, "mIoU": 0}
+                
             columns = ["scene_name", "tag", "Render_Metrics", "ATE_Metrics", "Seg_Metrics", "FPS"]
             normalized_path = os.path.normpath(self.config["Dataset"]["dataset_path"])
             scene_name = os.path.basename(normalized_path)

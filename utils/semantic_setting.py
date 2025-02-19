@@ -7,7 +7,7 @@ class Semantic_Config_DataClass:
     wandb_project:str = "GSFF_SLAM"
     save_root_dir:str = "results/replica"
     mode_list: List[str] = field(default_factory=lambda: ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino", "Base_Model_Pipe"])
-    mode:str = "GT_Label" # "Base_Model_Pipe"
+    mode:str = "Base_Model_Pipe" # "Base_Model_Pipe"
     enable:bool = True
     use_lseg:bool = False
     wandb_enable:bool = False
@@ -48,7 +48,7 @@ class Semantic_Config_DataClass:
         "GT_Label": "gt_label",
         "SAM_CLIP": "florence2_sam2", # fusion_features_0000.pt, mask_auto_label_0000.png
         "Grounding_Dino": "grounding_dino", # grounding_dino_feature_0000.pt, pred_label_0000.png
-        "Base_Model_Pipe": "grounding_dino_v2_2_16", # .pt .png # grounding_dino_v2_2_16, yolo_sam_2_18
+        "Base_Model_Pipe": "yolo_sam_2_19", # .pt .png # grounding_dino_v2_2_16, yolo_sam_2_18, 
     })
     render_size = [360, 480]
     

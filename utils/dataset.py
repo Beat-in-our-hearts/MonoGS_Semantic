@@ -463,7 +463,7 @@ class TUMDataset_Semantic(MonocularDataset):
             self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.png"))
             print("Number of pred_semantic: ", len(self.pred_semantic_paths))
         else:
-            raise NotImplementedError
+            raise ValueError(f"{Semantic_Config.mode}")
         
     def get_pred_semantic(self, idx):
         return self.pred_semantic_paths[idx]
