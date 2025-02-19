@@ -176,16 +176,17 @@ class SLAM:
                     cnn_decoder_state_dict = None
                 else:
                     cnn_decoder_state_dict = self.frontend.cnn_decoder.state_dict()
-                seg_result = eval_segmentation(
-                            self.frontend.cameras,
-                            self.dataset,
-                            self.gaussians,
-                            self.pipeline_params,
-                            self.background,
-                            self.save_dir,
-                            cnn_decoder_state_dict,
-                            self.frontend.gt_text_features,
-                        )
+                if self.config["Dataset"]["type"] in ["replica", "replica_semantic", "scannet", "scannet_semantic"]:
+                    seg_result = eval_segmentation(
+                                self.frontend.cameras,
+                                self.dataset,
+                                self.gaussians,
+                                self.pipeline_params,
+                                self.background,
+                                self.save_dir,
+                                cnn_decoder_state_dict,
+                                self.frontend.gt_text_features,
+                            )
             else:
                 seg_result = {"pixel_acc": 0, "mIoU": 0}
             columns = ["scene_name", "tag", "Render_Metrics", "ATE_Metrics", "Seg_Metrics", "FPS"]
