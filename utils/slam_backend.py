@@ -56,9 +56,9 @@ class BackEnd(mp.Process):
         self.keyframe_optimizers = None
         
         # CNN Decoder to upsample semantic features
-        if Semantic_Config.enable and Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"]:
+        if Semantic_Config.enable and Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino", "Base_Model_Pipe"]:
             self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
-            if Semantic_Config.mode == ["Grounding_Dino", "Grounding_Dino_v2"]:
+            if Semantic_Config.mode in ["Grounding_Dino", "Base_Model_Pipe"]:
                 self.cnn_decoder.load_state_dict(torch.load("checkpoints/decoder_128_512.pth"))
                 
         self.gt_text_features = None
@@ -412,10 +412,10 @@ class BackEnd(mp.Process):
         return gaussian_split
 
     def map_grounding_dino(self, iters=1, window_size=2, predict_threshold = 0.3, init_flag=False):
-        if Semantic_Config.mode in ["Grounding_Dino_v2", "Grounding_Dino"] and Semantic_Config.enable:
+        if Semantic_Config.mode in ["Base_Model_Pipe", "Grounding_Dino"] and Semantic_Config.enable:
             pass
         else:
-            raise ValueError('''Semantic_Config.mode in ['Grounding_Dino_v2', 'Grounding_Dino'] and Semantic_Config.enable''')
+            raise ValueError('''Semantic_Config.mode in ['Base_Model_Pipe', 'Grounding_Dino'] and Semantic_Config.enable''')
 
         if len(self.current_window) == 0:
             return
@@ -455,7 +455,6 @@ class BackEnd(mp.Process):
                 l1_feature = l1_loss(feature_map, pred_dense_feature)
                 loss_semantic += l1_feature
                 loss_semantic.backward()
-                print(l1_feature.item())
                 with torch.no_grad():
                     self.gaussians.semantic_optimizer.step()
                     self.gaussians.semantic_optimizer.zero_grad()
@@ -474,7 +473,7 @@ class BackEnd(mp.Process):
                 
                 black_mask = black_mask.cpu().numpy()
                 labeled_array, num_area = ndi.label(black_mask)
-                hole_threshold = 1000
+                hole_threshold = 2500
                 area_sizes = np.bincount(labeled_array.ravel()) 
                 small_area_indices = np.where(area_sizes < hole_threshold)[0]
                 hole_mask = np.zeros_like(black_mask)
@@ -488,34 +487,45 @@ class BackEnd(mp.Process):
         for _ in range(iters):
             loss_semantic = 0
             for cam_idx in semantic_window:
+                # get pred feature
+                pred_label = pred_label_stack[cam_idx]  
+                pred_feature = pred_feature_stack[cam_idx]
+                
+                if pred_feature["text_feature"] == None:
+                    continue
+                # get render feature
                 viewpoint = viewpoint_stack[cam_idx] 
                 render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
                 feature_map = render_pkg["feature_map"]
                 # resize the feature map
                 render_size = Semantic_Config.render_size
                 feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), render_size,mode="bilinear", align_corners=True).squeeze(0))
-                # get pred feature
-                pred_label = pred_label_stack[cam_idx]  
-                pred_feature = pred_feature_stack[cam_idx]
+                
+                # create dense feature
                 pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim[Semantic_Config.mode])
                 pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
                 # NOTE vaild mask
                 vaild_mask = pred_label != 0
-                black_mask = predict_mask_stack[cam_idx]
-                vaild_mask = torch.logical_or(vaild_mask, black_mask)
+                
+                # # fix vaild mask
+                # black_mask = predict_mask_stack[cam_idx]
+                # vaild_mask = torch.logical_or(vaild_mask, black_mask)
+                
                 vaild_mask = vaild_mask.float().unsqueeze(0)
                 vaild_mask = F.interpolate(vaild_mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
                 
                 # no grad in pred_dense_feature
                 pred_dense_feature = pred_dense_feature.detach() 
                 vaild_mask = vaild_mask.detach()
-                l1_feature = l1_loss(feature_map[...,vaild_mask], pred_dense_feature[...,vaild_mask])
+                # l1_feature = l1_loss(feature_map[...,vaild_mask], pred_dense_feature[...,vaild_mask])
+                l1_feature = l1_loss(feature_map, pred_dense_feature)
                 loss_semantic += l1_feature
             
-            loss_semantic.backward()
-            with torch.no_grad():
-                self.gaussians.semantic_optimizer.step()
-                self.gaussians.semantic_optimizer.zero_grad()   
+            if loss_semantic != 0:
+                loss_semantic.backward()
+                with torch.no_grad():
+                    self.gaussians.semantic_optimizer.step()
+                    self.gaussians.semantic_optimizer.zero_grad()   
             
                 
     def map_semantic(self, iters=1, window_size=2, init_flag=False):
@@ -543,7 +553,7 @@ class BackEnd(mp.Process):
         
         # NOTE rerender the semantic feature
         with torch.no_grad():
-            if Semantic_Config.mode in ["Grounding_Dino_v2", "Grounding_Dino"]:
+            if Semantic_Config.mode in ["Base_Model_Pipe", "Grounding_Dino"]:
                 render_pkg_mask_stack = []
                 for cam_idx in range(len(semantic_window)):
                     viewpoint = viewpoint_stack[cam_idx]
@@ -654,7 +664,7 @@ class BackEnd(mp.Process):
                     lseg_label_img = cv2.imread(pred_lseg_label_path, cv2.IMREAD_GRAYSCALE)
                     lseg_label = torch.tensor(lseg_label_img).long().cuda()
                     lseg_label_stack.append(lseg_label)
-        elif Semantic_Config.mode in ["Grounding_Dino_v2"]:
+        elif Semantic_Config.mode in ["Base_Model_Pipe"]:
             for i in range(len(semantic_window)):
                 pred_semantic_path = self.dataset.get_pred_semantic(semantic_window[i])
                 pred_feature = torch.load(pred_semantic_path, weights_only=True) 
@@ -693,7 +703,7 @@ class BackEnd(mp.Process):
                     pred_feature = F.interpolate(pred_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
                     l1_feature = l1_loss(feature_map, pred_feature)
                     loss_semantic += l1_feature
-                elif Semantic_Config.mode in ["Grounding_Dino_v2"]:
+                elif Semantic_Config.mode in ["Base_Model_Pipe"]:
                     # no decect
                     if pred_feature_stack[cam_idx] == None and tensor_label_stack[cam_idx] == None: 
                         continue
@@ -862,7 +872,7 @@ class BackEnd(mp.Process):
             tag = "sync_backend"
         state_dict_cpu = None
         if Semantic_Config.enable:
-            if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"]:
+            if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino", "Base_Model_Pipe"]:
                 decoder_state_dict = self.cnn_decoder.state_dict()
                 state_dict_cpu = {key: value.cpu() for key, value in decoder_state_dict.items()}
         msg = [tag, self.gaussians.get_state_dict(), self.occ_aware_visibility, keyframes, state_dict_cpu]
@@ -911,7 +921,7 @@ class BackEnd(mp.Process):
                     self.add_next_kf(cur_frame_idx, viewpoint, depth_map=depth_map, init=True)
                     self.initialize_map(cur_frame_idx, viewpoint)
                     self.current_window = [cur_frame_idx]
-                    if Semantic_Config.mode == "Grounding_Dino_v2":
+                    if Semantic_Config.mode == "Base_Model_Pipe":
                         self.map_grounding_dino(iters=Semantic_Config.semantic_init_iter, init_flag=True)
                     else:
                         self.map_semantic(iters=Semantic_Config.semantic_init_iter, init_flag=True)
@@ -946,7 +956,7 @@ class BackEnd(mp.Process):
                     
                     self.map(self.current_window, iters=iter_per_kf)
                     self.map(self.current_window, prune=True)
-                    if Semantic_Config.mode == "Grounding_Dino_v2":
+                    if Semantic_Config.mode == "Base_Model_Pipe":
                         self.map_grounding_dino(iters=Semantic_Config.semantic_iter, window_size=Semantic_Config.semantic_window)
                     else:
                         self.map_semantic(iters=Semantic_Config.semantic_iter, window_size=Semantic_Config.semantic_window)

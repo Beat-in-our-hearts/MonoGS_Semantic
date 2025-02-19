@@ -489,7 +489,7 @@ class ReplicaDataset_Semantic(MonocularDataset):
         elif Semantic_Config.mode == "Grounding_Dino":
             self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/pred_label_*.png"))
             self.pred_lseg_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/lseg_label/*.png"))
-        elif Semantic_Config.mode == "Grounding_Dino_v2":
+        elif Semantic_Config.mode == "Base_Model_Pipe":
             self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.png"))
         print("Number of pred_semantic: ", len(self.pred_semantic_paths))
 
@@ -500,7 +500,7 @@ class ReplicaDataset_Semantic(MonocularDataset):
         return self.semantic_paths[idx]
     
     def get_pred_label(self, idx):
-        if Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino", "Grounding_Dino_v2"]:
+        if Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino", "Base_Model_Pipe"]:
             return self.pred_label_paths[idx]
         else:
             return None

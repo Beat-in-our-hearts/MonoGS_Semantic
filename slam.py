@@ -94,9 +94,15 @@ class SLAM:
             self.frontend.clip_model, _ = clip.load("ViT-B/32", device=self.frontend.device, 
                                             jit=True, download_root="/tmp")
             self.frontend.clip_model.eval()
-            with open("gui/info_semantic.json", "r") as f:
-                info_semantic = json.load(f) 
-            class_names = [item["name"] for item in info_semantic["classes"]]
+            
+            if self.config["Dataset"]["type"] in ["replica", "replica_semantic"]:
+                with open("gui/info_semantic.json", "r") as f:
+                    info_semantic = json.load(f) 
+                class_names = [item["name"] for item in info_semantic["classes"]]
+            
+            elif self.config["Dataset"]["type"] in ["tum", "tum_semantic"]:
+                class_names = ['chair', 'toy', 'mouse', 'telephone', 'indoor plant', 'tool', 'keyboard', 'monitor', 'tape', 'bin', 'bottle', 'ball', 'cup', 'picture', 'paper', 'book', 'notebook computer']
+            
             gt_text_tokens = clip.tokenize(class_names).to(self.frontend.device)
             gt_text_features = self.frontend.clip_model.encode_text(gt_text_tokens)
             gt_text_features /= gt_text_features.norm(dim=-1, keepdim=True)
@@ -208,7 +214,7 @@ class SLAM:
                     self.gaussians.load_state_dict(data[1])
                     break
 
-            rendering_result = eval_rendering(
+            rendering_result_after = eval_rendering(
                 self.frontend.cameras,
                 self.gaussians,
                 self.dataset,
@@ -219,26 +225,23 @@ class SLAM:
                 iteration="after_opt",
                 depth_l1=not self.monocular,
             )
-            # if Semantic_Config.eval_segmentation:
-            #     seg_result = eval_segmentation(
-            #                 self.frontend.cameras,
-            #                 self.dataset,
-            #                 self.gaussians,
-            #                 self.pipeline_params,
-            #                 self.background,
-            #                 self.save_dir,
-            #             )
-            # else:
-            #     seg_result = {"pixel_acc": 0, "mIoU": 0}
             metrics_table.add_data(
                 scene_name,
                 "After",
-                rendering_result,
+                rendering_result_after,
                 ate_result,
                 seg_result,
                 FPS,
             )
             wandb.log({"Metrics": metrics_table})
+            
+            final_res = {"ate_result": ate_result,
+                         "rendering_result": rendering_result,
+                         "seg_result": seg_result,
+                         "rendering_result_after": rendering_result_after}
+            
+            with open(os.path.join(save_dir, "metric", "eval_final.json"), 'w', encoding='utf-8') as f:
+                json.dump(final_res, f, indent=4)   
 
         backend_queue.put(["stop"])
         backend_process.join()
