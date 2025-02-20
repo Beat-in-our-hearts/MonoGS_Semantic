@@ -497,6 +497,12 @@ class FrontEnd(mp.Process):
                 pred_label = (torch.argmax(pred_ssim, dim=-1) + 1) # W x H, 0 is background
                 pred_label[black_mask] = 0 # 0 is background
                 pred_label = pred_label.detach().cpu().numpy().astype(np.uint8)
+                
+                # TODO fix
+                synonyms_id_dict = {98:40, 97:12}
+                for key, value in synonyms_id_dict.items():
+                    pred_label[pred_label == key] = value
+                
                 img_label = label_colormap()[pred_label]
                 
                 render_semantic_path = os.path.join(semantic_root_dir, f"vis_semantic_{cur_frame_idx:04d}.jpg")

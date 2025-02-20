@@ -74,6 +74,7 @@ class Semantic_Config_DataClass:
     }
     
     Autoencoder_Test = False
+    using_top_dim = True
     train_decoder = True
 
 Semantic_Config = Semantic_Config_DataClass()
