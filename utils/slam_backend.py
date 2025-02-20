@@ -553,6 +553,9 @@ class BackEnd(mp.Process):
             if loss_semantic != 0:
                 loss_semantic.backward()
                 with torch.no_grad():
+                    if Semantic_Config.train_decoder:
+                        self.cnn_decoder_optimizer.step()
+                        self.cnn_decoder_optimizer.zero_grad()
                     self.gaussians.semantic_optimizer.step()
                     self.gaussians.semantic_optimizer.zero_grad()   
             
