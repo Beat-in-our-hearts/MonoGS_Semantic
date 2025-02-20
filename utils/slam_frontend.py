@@ -62,7 +62,10 @@ class FrontEnd(mp.Process):
         
         # CNN Decoder to upsample semantic features
         if Semantic_Config.mode in ["SAM2", "CLIP", "SAM_CLIP", "Grounding_Dino", "Base_Model_Pipe"]:
-            self.cnn_decoder, _ = build_decoder(mode='eval')
+            if Semantic_Config.Autoencoder_Test:
+                self.cnn_decoder, _ = build_decoder(model_type='autoencoder')
+            else:
+                self.cnn_decoder, _ = build_decoder(mode='eval')
             
         self.clip_model = None
         self.gt_text_features = None
@@ -482,7 +485,12 @@ class FrontEnd(mp.Process):
                 raise NotImplementedError
             elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino", "Base_Model_Pipe"]:
                 feature_map = render_pkg["feature_map"]
-                feature_map = self.cnn_decoder(feature_map)
+                if Semantic_Config.Autoencoder_Test:
+                    feature_shape = feature_map.shape
+                    feature_map = self.cnn_decoder.decoder(feature_map.flatten(1).permute(1, 0)).permute(1, 0)
+                    feature_map = feature_map.view(-1, feature_shape[1], feature_shape[2])
+                else:
+                    feature_map = self.cnn_decoder(feature_map)
                 pred_ssim = feature_map.permute(1, 2, 0) @ self.gt_text_features.T
                 threshold = Semantic_Config.semantic_threshold
                 black_mask = (pred_ssim < threshold).all(dim=-1)

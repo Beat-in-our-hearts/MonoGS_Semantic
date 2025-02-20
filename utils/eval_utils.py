@@ -230,7 +230,10 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background,
         os.makedirs(semantic_class_root_dir, exist_ok=True)
     
     if Semantic_Config.mode in ["Grounding_Dino","Base_Model_Pipe"]:
-        cnn_decoder, _ = build_decoder(mode="eval")
+        if Semantic_Config.Autoencoder_Test:
+            cnn_decoder, _ = build_decoder(model_type='autoencoder')
+        else:
+            cnn_decoder, _ = build_decoder(mode="eval")
         if decoder_state_dict is not None:
             cnn_decoder.load_state_dict(decoder_state_dict)
         else:
@@ -257,10 +260,15 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background,
                 vis_semantic_class_path = os.path.join(semantic_class_root_dir, f"vis_semantic_class_{idx:04d}.jpg")
                 cv2.imwrite(vis_semantic_class_path, cv2.cvtColor(vis_eval_semantic, cv2.COLOR_RGB2BGR))
                 
-        elif Semantic_Config.mode in ["Grounding_Dino","Base_Model_Pipe"]:
+        elif Semantic_Config.mode in ["Grounding_Dino", "Base_Model_Pipe"]:
             render_pkg = render(frame, gaussians, pipe, background, flag_semantic=True)
             feature_map = render_pkg["feature_map"]
-            feature_map = cnn_decoder(feature_map)
+            if Semantic_Config.Autoencoder_Test:
+                feature_shape = feature_map.shape
+                feature_map = cnn_decoder.decoder(feature_map.flatten(1).permute(1, 0)).permute(1, 0)
+                feature_map = feature_map.view(-1, feature_shape[1], feature_shape[2])
+            else:
+                feature_map = cnn_decoder(feature_map)
             pred_ssim = feature_map.permute(1, 2, 0) @ clip_text_feature.T
             threshold = Semantic_Config.semantic_threshold
             black_mask = (pred_ssim < threshold).all(dim=-1)

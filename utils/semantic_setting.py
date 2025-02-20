@@ -15,13 +15,13 @@ class Semantic_Config_DataClass:
     eval_segmentation:bool = True
     
     gs_init_lr:float = 5.0
-    semantic_lr_scale:float = 10.0
+    semantic_lr_scale:float = 2.0
     
-    semantic_window_select = {"Grounding_Dino":1, "GT_Label": 2, "Base_Model_Pipe":1}
+    semantic_window_select = {"Grounding_Dino":1, "GT_Label": 2, "Base_Model_Pipe":5}
     semantic_window:int = semantic_window_select[mode]
     
     init_iter = {"Grounding_Dino": 20, "GT_Label": 10, "Base_Model_Pipe": 20}
-    map_iter = {"Grounding_Dino": 6, "GT_Label": 3, "Base_Model_Pipe": 6}
+    map_iter = {"Grounding_Dino": 6, "GT_Label": 3, "Base_Model_Pipe": 1}
     
     semantic_init_iter:int = init_iter[mode]
     semantic_iter:int = map_iter[mode]
@@ -48,7 +48,7 @@ class Semantic_Config_DataClass:
         "GT_Label": "gt_label",
         "SAM_CLIP": "florence2_sam2", # fusion_features_0000.pt, mask_auto_label_0000.png
         "Grounding_Dino": "grounding_dino", # grounding_dino_feature_0000.pt, pred_label_0000.png
-        "Base_Model_Pipe": "yolo_sam_2_19", # .pt .png # grounding_dino_v2_2_16, yolo_sam_2_18, 
+        "Base_Model_Pipe": "yolo_sam_2_18", # .pt .png # grounding_dino_v2_2_16, yolo_sam_2_18, yolo_sam_2_19
     })
     render_size = [360, 480]
     
@@ -72,6 +72,8 @@ class Semantic_Config_DataClass:
         "sparse_ratio": 0.01,
         "noise_ratio": 0.99,
     }
+    
+    Autoencoder_Test = False
 
 Semantic_Config = Semantic_Config_DataClass()
 

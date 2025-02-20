@@ -196,7 +196,7 @@ def load_seg_map(filepath, W, H):
     return dense_seg_map
 
 @torch.no_grad()
-def create_dense_feature(label_map, feature, dim=512):
+def create_dense_feature(label_map, feature, dim=512) -> torch.Tensor:
     """
         return dense feature map with shape (D, H, W)
     """
