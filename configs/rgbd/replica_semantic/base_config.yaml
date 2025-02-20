@@ -55,7 +55,7 @@ Training:
 
   kf_translation: 0.04
   kf_min_translation: 0.02 # 0.02
-  kf_overlap: 0.8
+  kf_overlap: 0.85
   prune_mode: 'slam'
   spherical_harmonics: False
   lr:
