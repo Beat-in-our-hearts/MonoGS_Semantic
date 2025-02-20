@@ -64,7 +64,9 @@ class BackEnd(mp.Process):
             else:
                 self.cnn_decoder, self.cnn_decoder_optimizer = build_decoder()
                 if Semantic_Config.mode in ["Grounding_Dino", "Base_Model_Pipe"]:
-                    self.cnn_decoder.load_state_dict(torch.load("checkpoints/decoder_128_512.pth"))
+                    decoder_pth = f"checkpoints/decoder_{get_semantic_channels()}_{Semantic_Config.semantic_dim}.pth"
+                    if os.path.exists(decoder_pth):
+                        self.cnn_decoder.load_state_dict(torch.load(decoder_pth))
                 
         self.gt_text_features = None
 

@@ -6,7 +6,7 @@ from typing import List, Dict
 class Semantic_Config_DataClass:
     wandb_project:str = "GSFF_SLAM"
     save_root_dir:str = "results/replica"
-    mode_list: List[str] = field(default_factory=lambda: ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino", "Base_Model_Pipe"])
+    mode_list = ["SAM2", "CLIP", "GT_Label", "SAM_CLIP", "Grounding_Dino", "Base_Model_Pipe"]
     mode:str = "Base_Model_Pipe" # "Base_Model_Pipe"
     enable:bool = True
     use_lseg:bool = False
@@ -27,7 +27,7 @@ class Semantic_Config_DataClass:
     semantic_iter:int = map_iter_dict[mode]
     semantic_threshold:float = 0.6
     
-    semantic_dim_dict: Dict[str, int] = field(default_factory=lambda: {
+    semantic_dim_dict = {
         "LSeg": 512,
         "SAM2": 256,
         "CLIP": 768, 
@@ -35,23 +35,23 @@ class Semantic_Config_DataClass:
         "SAM_CLIP": 512,
         "Grounding_Dino": 512,
         "Base_Model_Pipe": 512,
-    })
+    }
     semantic_dim = semantic_dim_dict[mode]
     
-    fmap_size: Dict[str, List[int]] = field(default_factory=lambda: {
+    fmap_size =  {
         "LSeg": [360, 480],
         "SAM2": [64, 64], # 256, 64, 64
         "CLIP": [24, 42], # 768, 24, 42, 
-    })
-    dataset_path_dict: Dict[str, str] = field(default_factory=lambda: {
+    }
+    dataset_path_dict = {
         "LSeg": "rgb_feature_lseg",
         "SAM2": "rgb_feature_sam2",
         "CLIP": "rgb_feature_clip",
         "GT_Label": "gt_label",
         "SAM_CLIP": "florence2_sam2", # fusion_features_0000.pt, mask_auto_label_0000.png
         "Grounding_Dino": "grounding_dino", # grounding_dino_feature_0000.pt, pred_label_0000.png
-        "Base_Model_Pipe": "yolo_sam_2_18", # .pt .png # grounding_dino_v2_2_16, yolo_sam_2_18, yolo_sam_2_19
-    })
+        "Base_Model_Pipe": "yolo_sam_2_19", # .pt .png # grounding_dino_v2_2_16, yolo_sam_2_18, yolo_sam_2_19
+    }
     dataset_path = dataset_path_dict[mode]
     render_size = [360, 480]
     
