@@ -20,14 +20,14 @@ class Semantic_Config_DataClass:
     semantic_window_select = {"Grounding_Dino":1, "GT_Label": 2, "Base_Model_Pipe":5}
     semantic_window:int = semantic_window_select[mode]
     
-    init_iter = {"Grounding_Dino": 20, "GT_Label": 10, "Base_Model_Pipe": 20}
-    map_iter = {"Grounding_Dino": 6, "GT_Label": 3, "Base_Model_Pipe": 1}
+    init_iter_dict = {"Grounding_Dino": 20, "GT_Label": 10, "Base_Model_Pipe": 20}
+    map_iter_dict = {"Grounding_Dino": 6, "GT_Label": 3, "Base_Model_Pipe": 1}
     
-    semantic_init_iter:int = init_iter[mode]
-    semantic_iter:int = map_iter[mode]
+    semantic_init_iter:int = init_iter_dict[mode]
+    semantic_iter:int = map_iter_dict[mode]
     semantic_threshold:float = 0.6
     
-    semantic_dim: Dict[str, int] = field(default_factory=lambda: {
+    semantic_dim_dict: Dict[str, int] = field(default_factory=lambda: {
         "LSeg": 512,
         "SAM2": 256,
         "CLIP": 768, 
@@ -36,12 +36,14 @@ class Semantic_Config_DataClass:
         "Grounding_Dino": 512,
         "Base_Model_Pipe": 512,
     })
+    semantic_dim = semantic_dim_dict[mode]
+    
     fmap_size: Dict[str, List[int]] = field(default_factory=lambda: {
         "LSeg": [360, 480],
         "SAM2": [64, 64], # 256, 64, 64
         "CLIP": [24, 42], # 768, 24, 42, 
     })
-    dataset_path: Dict[str, str] = field(default_factory=lambda: {
+    dataset_path_dict: Dict[str, str] = field(default_factory=lambda: {
         "LSeg": "rgb_feature_lseg",
         "SAM2": "rgb_feature_sam2",
         "CLIP": "rgb_feature_clip",
@@ -50,6 +52,7 @@ class Semantic_Config_DataClass:
         "Grounding_Dino": "grounding_dino", # grounding_dino_feature_0000.pt, pred_label_0000.png
         "Base_Model_Pipe": "yolo_sam_2_18", # .pt .png # grounding_dino_v2_2_16, yolo_sam_2_18, yolo_sam_2_19
     })
+    dataset_path = dataset_path_dict[mode]
     render_size = [360, 480]
     
     Debug:bool = False

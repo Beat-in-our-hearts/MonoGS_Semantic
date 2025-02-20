@@ -459,8 +459,8 @@ class TUMDataset_Semantic(MonocularDataset):
         self.poses = parser.poses
         
         if Semantic_Config.mode == "Base_Model_Pipe":
-            self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.pt"))    
-            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.png"))
+            self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path}/*.pt"))    
+            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path}/*.png"))
             print("Number of pred_semantic: ", len(self.pred_semantic_paths))
         else:
             raise ValueError(f"{Semantic_Config.mode}")
@@ -506,14 +506,14 @@ class ReplicaDataset_Semantic(MonocularDataset):
         self.poses = parser.poses
         
         self.semantic_paths = sorted(glob.glob(f"{dataset_path}/semantic_class/semantic_class_*.png"))
-        self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.pt"))
+        self.pred_semantic_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path}/*.pt"))
         if Semantic_Config.mode == "SAM_CLIP":
-            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/mask_auto_label_*.png"))
+            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path}/mask_auto_label_*.png"))
         elif Semantic_Config.mode == "Grounding_Dino":
-            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/pred_label_*.png"))
-            self.pred_lseg_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/lseg_label/*.png"))
+            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path}/pred_label_*.png"))
+            self.pred_lseg_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path}/lseg_label/*.png"))
         elif Semantic_Config.mode == "Base_Model_Pipe":
-            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path[Semantic_Config.mode]}/*.png"))
+            self.pred_label_paths = sorted(glob.glob(f"{dataset_path}/{Semantic_Config.dataset_path}/*.png"))
         print("Number of pred_semantic: ", len(self.pred_semantic_paths))
 
     def get_pred_semantic(self, idx):

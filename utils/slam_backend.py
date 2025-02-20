@@ -457,7 +457,7 @@ class BackEnd(mp.Process):
                 with torch.no_grad():
                     pred_label = pred_label_stack[cam_idx]  
                     pred_feature = pred_feature_stack[cam_idx]
-                    pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim[Semantic_Config.mode])
+                    pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim)
                     pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
                     # compute loss
                     if Semantic_Config.Autoencoder_Test:
@@ -525,7 +525,7 @@ class BackEnd(mp.Process):
                 
                 # create dense feature
                 with torch.no_grad():
-                    pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim[Semantic_Config.mode])
+                    pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim)
                     pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
                     # NOTE vaild mask
                     vaild_mask = pred_label != 0
@@ -745,7 +745,7 @@ class BackEnd(mp.Process):
                     # resize the supervise signal
                     pred_label = tensor_label_stack[cam_idx]  
                     pred_feature = pred_feature_stack[cam_idx]
-                    pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim[Semantic_Config.mode])
+                    pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim)
                     pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
                     
                     # resize the supervise mask
@@ -778,7 +778,7 @@ class BackEnd(mp.Process):
                     pred_feature = pred_feature_stack[cam_idx]
 
                     pred_dense_feature = create_dense_feature(pred_label, pred_feature, 
-                                                              Semantic_Config.semantic_dim[Semantic_Config.mode])
+                                                              Semantic_Config.semantic_dim)
                     pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
                     
                     mask = (pred_label != 0).float().unsqueeze(0) # NOTE pred vaild mask

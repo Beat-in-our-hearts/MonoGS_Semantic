@@ -148,7 +148,7 @@ class Autoencoder(nn.Module):
     
 def build_decoder(mode='train', lr=0.001, model_type='cnn'):
     if model_type == 'cnn':
-        pred_feature_dim = Semantic_Config.semantic_dim[Semantic_Config.mode]
+        pred_feature_dim = Semantic_Config.semantic_dim
         semantic_feature_dim = get_semantic_channels()
         cnn_decoder, cnn_decoder_optimizer = None, None
         if mode == 'train':
@@ -161,7 +161,7 @@ def build_decoder(mode='train', lr=0.001, model_type='cnn'):
         return cnn_decoder, cnn_decoder_optimizer
     elif model_type == 'autoencoder':
         semantic_feature_dim = get_semantic_channels()
-        autoencoder = Autoencoder(input_dim=Semantic_Config.semantic_dim[Semantic_Config.mode], hidden_dim=semantic_feature_dim).to("cuda")
+        autoencoder = Autoencoder(input_dim=Semantic_Config.semantic_dim, hidden_dim=semantic_feature_dim).to("cuda")
         autoencoder.eval()
         return autoencoder, None
 
