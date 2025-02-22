@@ -210,6 +210,17 @@ def create_dense_feature(label_map, feature, dim=512) -> torch.Tensor:
         dense_feature[label_map == i+1] = clip_features[i]
     return dense_feature.permute(2, 0, 1)
 
+def cosine_similarity_map(A, B, epsilon=1e-6):
+    norm_A = torch.norm(A, dim=-1, keepdim=True)  # (W, H, 1)
+    norm_B = torch.norm(B, dim=-1, keepdim=True)  # (N, 1)
+    
+    norm_A = torch.where(norm_A < epsilon, torch.ones_like(norm_A), norm_A)
+    norm_B = torch.where(norm_B < epsilon, torch.ones_like(norm_B), norm_B)
+    
+    dot_product = torch.einsum('whd,nd->whn', A, B) 
+    similarity_map = dot_product / (norm_A * norm_B.T)  # (W, H, N)
+    return similarity_map
+
 @torch.no_grad()
 def fix_pred_feature(pred_feature, empty_mask, threshold=1000):
     """

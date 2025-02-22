@@ -6,6 +6,7 @@ import cv2
 import evo
 import numpy as np
 import torch
+import torch.nn.functional as F
 from evo.core import metrics, trajectory
 from evo.core.metrics import PoseRelation, Unit
 from evo.core.trajectory import PosePath3D, PoseTrajectory3D
@@ -25,7 +26,7 @@ from utils.logging_utils import Log
 from utils.semantic_setting import Semantic_Config
 from utils.eval_segmentation import SegmentationMetric
 from diff_gaussian_rasterization import get_semantic_channels
-from utils.semantic_utils import build_decoder
+from utils.semantic_utils import build_decoder, cosine_similarity_map
 from imgviz import label_colormap
 
 def evaluate_evo(poses_gt, poses_est, plot_dir, label, monocular=False):
@@ -267,9 +268,15 @@ def eval_segmentation(frames, dataset, gaussians, pipe, background,
                 feature_shape = feature_map.shape
                 feature_map = cnn_decoder.decoder(feature_map.flatten(1).permute(1, 0)).permute(1, 0)
                 feature_map = feature_map.view(-1, feature_shape[1], feature_shape[2])
-            else:
+            elif not Semantic_Config.using_top_dim:
                 feature_map = cnn_decoder(feature_map)
-            pred_ssim = feature_map.permute(1, 2, 0) @ clip_text_feature.T
+                
+            if Semantic_Config.using_top_dim:
+                feature_map = feature_map.permute(1, 2, 0)
+                text_feature = clip_text_feature[...,:get_semantic_channels()]
+                pred_ssim = cosine_similarity_map(feature_map, text_feature)
+            else:
+                pred_ssim = feature_map.permute(1, 2, 0) @ clip_text_feature.T
             threshold = Semantic_Config.semantic_threshold
             black_mask = (pred_ssim < threshold).all(dim=-1)
             pred_label = (torch.argmax(pred_ssim, dim=-1) + 1) # W x H, 0 is background

@@ -451,16 +451,20 @@ class BackEnd(mp.Process):
                 render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
                 feature_map = render_pkg["feature_map"]
                 # resize the feature map
-                render_size = Semantic_Config.render_size
-                feature_map = F.interpolate(feature_map.unsqueeze(0), render_size,mode="bilinear", align_corners=True).squeeze(0)
-                if not Semantic_Config.Autoencoder_Test:
-                    feature_map = self.cnn_decoder(feature_map)
+                if Semantic_Config.resize_speedup:
+                    render_size = Semantic_Config.top_dim_supervise_size
+                    feature_map = F.interpolate(feature_map.unsqueeze(0), render_size,mode="nearest", align_corners=True).squeeze(0)
+                if not Semantic_Config.Autoencoder_Test and not Semantic_Config.using_top_dim:
+                    feature_map = self.cnn_decoder(feature_map) #NOTE 512 dim
                 # get pred feature
                 with torch.no_grad():
                     pred_label = pred_label_stack[cam_idx]  
                     pred_feature = pred_feature_stack[cam_idx]
                     pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim)
-                    pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
+                    if Semantic_Config.using_top_dim:
+                        pred_dense_feature = pred_dense_feature[:get_semantic_channels(), ...] #NOTE 128 dim
+                    if Semantic_Config.resize_speedup:
+                        pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="nearest", align_corners=True).squeeze(0)
                     # compute loss
                     if Semantic_Config.Autoencoder_Test:
                         feature_shape = pred_dense_feature.shape
@@ -477,34 +481,38 @@ class BackEnd(mp.Process):
                     self.gaussians.semantic_optimizer.zero_grad()
             return
             
-        # get rerender black mask 1:black
-        predict_mask_stack = {}
-        with torch.no_grad():
-            for cam_idx in semantic_window:
-                viewpoint = viewpoint_stack[cam_idx]
-                render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
-                feature_map = render_pkg["feature_map"]
-                if Semantic_Config.Autoencoder_Test:
-                    feature_shape = feature_map.shape
-                    feature_map = self.cnn_decoder.decoder(feature_map.flatten(1).permute(1, 0)).permute(1, 0)
-                    feature_map = feature_map.view(-1, feature_shape[1], feature_shape[2])
-                else:
-                    feature_map = self.cnn_decoder(feature_map)
-                pred_ssim = feature_map.detach().permute(1, 2, 0) @ self.gt_text_features.T # NOTE
-                black_mask = (pred_ssim < predict_threshold).all(dim=-1)
+        # # get rerender black mask 1:black
+        # predict_mask_stack = {}
+        # with torch.no_grad():
+        #     for cam_idx in semantic_window:
+        #         viewpoint = viewpoint_stack[cam_idx]
+        #         render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
+        #         feature_map = render_pkg["feature_map"]
+        #         if Semantic_Config.Autoencoder_Test:
+        #             feature_shape = feature_map.shape
+        #             feature_map = self.cnn_decoder.decoder(feature_map.flatten(1).permute(1, 0)).permute(1, 0)
+        #             feature_map = feature_map.view(-1, feature_shape[1], feature_shape[2])
+        #         elif not Semantic_Config.using_top_dim:
+        #             feature_map = self.cnn_decoder(feature_map) #NOTE 512 dim
+        #         if Semantic_Config.using_top_dim:
+        #             # pred_ssim = F.cosine_similarity(feature_map.detach().permute(1, 2, 0), self.gt_text_features[...,:get_semantic_channels()]) #NOTE 128 dim
+        #         else:
+        #             pred_ssim = feature_map.detach().permute(1, 2, 0) @ self.gt_text_features.T #NOTE 512 dim
+
+        #         black_mask = (pred_ssim < predict_threshold).all(dim=-1)
+        #         black_mask = black_mask.cpu().numpy()
                 
-                black_mask = black_mask.cpu().numpy()
-                labeled_array, num_area = ndi.label(black_mask)
-                hole_threshold = 2500
-                area_sizes = np.bincount(labeled_array.ravel()) 
-                small_area_indices = np.where(area_sizes < hole_threshold)[0]
-                hole_mask = np.zeros_like(black_mask)
-                for indices in small_area_indices:
-                    hole_mask[labeled_array==indices] = 1
-                hole_mask = hole_mask.astype(bool)
+        #         labeled_array, num_area = ndi.label(black_mask)
+        #         hole_threshold = 2500
+        #         area_sizes = np.bincount(labeled_array.ravel()) 
+        #         small_area_indices = np.where(area_sizes < hole_threshold)[0]
+        #         hole_mask = np.zeros_like(black_mask)
+        #         for indices in small_area_indices:
+        #             hole_mask[labeled_array==indices] = 1
+        #         hole_mask = hole_mask.astype(bool)
                 
-                predict_mask = black_mask & ~hole_mask
-                predict_mask_stack[cam_idx] = torch.tensor(predict_mask).cuda() 
+        #         predict_mask = black_mask & ~hole_mask
+        #         predict_mask_stack[cam_idx] = torch.tensor(predict_mask).cuda() 
                
         for _ in range(iters):
             loss_semantic = 0
@@ -520,15 +528,20 @@ class BackEnd(mp.Process):
                 render_pkg = render(viewpoint, self.gaussians, self.pipeline_params, self.background, flag_semantic=True)
                 feature_map = render_pkg["feature_map"]
                 # resize the feature map
-                render_size = Semantic_Config.render_size
-                feature_map = F.interpolate(feature_map.unsqueeze(0), render_size,mode="bilinear", align_corners=True).squeeze(0)
-                if not Semantic_Config.Autoencoder_Test:
+                if Semantic_Config.resize_speedup:
+                    render_size = Semantic_Config.top_dim_supervise_size
+                    feature_map = F.interpolate(feature_map.unsqueeze(0), render_size,mode="nearest", align_corners=True).squeeze(0)
+                if not Semantic_Config.Autoencoder_Test and not Semantic_Config.using_top_dim:
                     feature_map = self.cnn_decoder(feature_map)
                 
                 # create dense feature
                 with torch.no_grad():
                     pred_dense_feature = create_dense_feature(pred_label, pred_feature, Semantic_Config.semantic_dim)
-                    pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0)
+                    if Semantic_Config.using_top_dim:
+                        pred_dense_feature = pred_dense_feature[:get_semantic_channels(), ...] #NOTE 128 dim
+                    if Semantic_Config.resize_speedup:
+                        pred_dense_feature = F.interpolate(pred_dense_feature.unsqueeze(0), render_size, mode="nearest", align_corners=True).squeeze(0)
+                    
                     # NOTE vaild mask
                     vaild_mask = pred_label != 0
                 
@@ -536,9 +549,10 @@ class BackEnd(mp.Process):
                     # black_mask = predict_mask_stack[cam_idx]
                     # vaild_mask = torch.logical_or(vaild_mask, black_mask)
                     
-                    vaild_mask = vaild_mask.float().unsqueeze(0)
-                    vaild_mask = F.interpolate(vaild_mask.unsqueeze(0), render_size, mode="bilinear", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
-                    
+                    if Semantic_Config.resize_speedup:
+                        vaild_mask = vaild_mask.float().unsqueeze(0)
+                        vaild_mask = F.interpolate(vaild_mask.unsqueeze(0), render_size, mode="nearest", align_corners=True).squeeze(0).squeeze(0).to(torch.bool)
+                        
                     # no grad in pred_dense_feature
                     if Semantic_Config.Autoencoder_Test:
                         feature_shape = pred_dense_feature.shape

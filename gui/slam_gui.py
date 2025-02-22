@@ -35,7 +35,7 @@ from utils.logging_utils import Log
 from utils.semantic_setting import Semantic_Config
 from utils.semantic_utils import apply_pca_colormap, generate_colored_mask
 from diff_gaussian_rasterization import get_semantic_channels
-from utils.semantic_utils import build_decoder
+from utils.semantic_utils import build_decoder, cosine_similarity_map
 from imgviz import label_colormap
 
 o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Error)
@@ -821,12 +821,17 @@ class SLAM_GUI:
             elif Semantic_Config.mode in ["SAM_CLIP", "Grounding_Dino", "Base_Model_Pipe"]:
                 feature_map = results["feature_map"]
                 render_shape = feature_map.shape
-                resize_feature_map = self.cnn_decoder(F.interpolate(feature_map.unsqueeze(0), 
-                                                    size= Semantic_Config.render_size,
-                                                    mode="bilinear", align_corners=True).squeeze(0))
+                resize_feature_map = F.interpolate(feature_map.unsqueeze(0), size=Semantic_Config.render_size, mode="bilinear", align_corners=True).squeeze(0)
+                if not Semantic_Config.using_top_dim:
+                    resize_feature_map = self.cnn_decoder(resize_feature_map)
                 
                 # W x H x N
-                pred_ssim = resize_feature_map.permute(1, 2, 0) @ self.gt_text_features.T
+                if Semantic_Config.using_top_dim:
+                    feature_map = feature_map.permute(1, 2, 0)
+                    text_feature = self.gt_text_features[...,:get_semantic_channels()]
+                    pred_ssim = cosine_similarity_map(feature_map, text_feature)
+                else:
+                    pred_ssim = resize_feature_map.permute(1, 2, 0) @ self.gt_text_features.T
                 # TODO filter low ssim  color black, all N channel < 0.2
                 threshold = self.similarity_scaling_slider.double_value
                 black_mask = (pred_ssim < threshold).all(dim=-1)

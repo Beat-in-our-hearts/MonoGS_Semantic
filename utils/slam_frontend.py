@@ -24,10 +24,10 @@ from utils.multiprocessing_utils import clone_obj
 from utils.pose_utils import update_pose
 from utils.slam_utils import get_loss_tracking, get_median_depth
 
-from utils.semantic_utils import build_decoder
+from utils.semantic_utils import build_decoder, cosine_similarity_map, apply_pca_colormap
 from utils.semantic_setting import Semantic_Config
-from utils.semantic_utils import apply_pca_colormap
 from imgviz import label_colormap
+from diff_gaussian_rasterization import get_semantic_channels
 
 class FrontEnd(mp.Process):
     def __init__(self, config):
@@ -406,6 +406,7 @@ class FrontEnd(mp.Process):
                     )
                 )
     
+    @ torch.no_grad()
     def save_render(self, cur_frame_idx, viewpoint:Camera):
         if not self.eval_rendering:
             return 
@@ -489,9 +490,14 @@ class FrontEnd(mp.Process):
                     feature_shape = feature_map.shape
                     feature_map = self.cnn_decoder.decoder(feature_map.flatten(1).permute(1, 0)).permute(1, 0)
                     feature_map = feature_map.view(-1, feature_shape[1], feature_shape[2])
-                else:
+                elif not Semantic_Config.using_top_dim:
                     feature_map = self.cnn_decoder(feature_map)
-                pred_ssim = feature_map.permute(1, 2, 0) @ self.gt_text_features.T
+                if Semantic_Config.using_top_dim:
+                    feature_map = feature_map.permute(1, 2, 0)
+                    text_feature = self.gt_text_features[...,:get_semantic_channels()]
+                    pred_ssim = cosine_similarity_map(feature_map, text_feature)
+                else:
+                    pred_ssim = feature_map.permute(1, 2, 0) @ self.gt_text_features.T
                 threshold = Semantic_Config.semantic_threshold
                 black_mask = (pred_ssim < threshold).all(dim=-1)
                 pred_label = (torch.argmax(pred_ssim, dim=-1) + 1) # W x H, 0 is background

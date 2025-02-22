@@ -20,12 +20,12 @@ class Semantic_Config_DataClass:
     semantic_window_select = {"Grounding_Dino":1, "GT_Label": 2, "Base_Model_Pipe":5}
     semantic_window:int = semantic_window_select[mode]
     
-    init_iter_dict = {"Grounding_Dino": 20, "GT_Label": 10, "Base_Model_Pipe": 20}
+    init_iter_dict = {"Grounding_Dino": 20, "GT_Label": 10, "Base_Model_Pipe": 10}
     map_iter_dict = {"Grounding_Dino": 6, "GT_Label": 3, "Base_Model_Pipe": 1}
     
     semantic_init_iter:int = init_iter_dict[mode]
     semantic_iter:int = map_iter_dict[mode]
-    semantic_threshold:float = 0.6
+    semantic_threshold:float = 0.90
     
     semantic_dim_dict = {
         "LSeg": 512,
@@ -50,7 +50,7 @@ class Semantic_Config_DataClass:
         "GT_Label": "gt_label",
         "SAM_CLIP": "florence2_sam2", # fusion_features_0000.pt, mask_auto_label_0000.png
         "Grounding_Dino": "grounding_dino", # grounding_dino_feature_0000.pt, pred_label_0000.png
-        "Base_Model_Pipe": "yolo_sam_2_19", # .pt .png # grounding_dino_v2_2_16, yolo_sam_2_18, yolo_sam_2_19
+        "Base_Model_Pipe": "grounding_dino_v2_2_16", # .pt .png # grounding_dino_v2_2_16, yolo_sam_2_18, yolo_sam_2_19
     }
     dataset_path = dataset_path_dict[mode]
     render_size = [360, 480]
@@ -78,7 +78,10 @@ class Semantic_Config_DataClass:
     
     Autoencoder_Test = False
     using_top_dim = True
-    train_decoder = True
+    train_decoder = False
+    
+    top_dim_supervise_size = [720, 960]
+    resize_speedup = True
 
 Semantic_Config = Semantic_Config_DataClass()
 
